@@ -20,6 +20,8 @@ from src.database.db_manager import DBManager
 from src.engine.prompt_generator import PersonaStore, PromptGenerator
 from src.publisher.meta_publisher import MetaPublisher
 from src.vault.media_host import build_media_host
+from src.vault.media_vault import MediaNotSupportedError, MediaVault
+from src.vault.telegram_archive import TelegramVault, VaultArchiveError
 from src.vision.visual_analyzer import OllamaUnavailableError, VisualAnalyzer
 
 logging.basicConfig(
@@ -54,12 +56,90 @@ def load_config(config_path: str) -> dict:
     return cfg
 
 
+def _vault_channel(db: DBManager, vault_cfg: dict) -> TelegramVault | None:
+    """Build the TelegramVault client when the channel is configured."""
+    telegram_cfg = vault_cfg.get("telegram", {}) or {}
+    bot_token = telegram_cfg.get("bot_token", "")
+    chat_id = telegram_cfg.get("chat_id", "")
+    if not bot_token or not chat_id:
+        return None
+    return TelegramVault(db, bot_token, chat_id)
+
+
+def _archive_vault_asset(
+    db: DBManager, vault_cfg: dict, vault_media_id: int, *, dry_run: bool
+) -> None:
+    """Best-effort archive of a vault asset to the Telegram channel."""
+    if dry_run:
+        return
+    channel = _vault_channel(db, vault_cfg)
+    if channel is None:
+        logger.info("Vault channel not configured; skipping archive upload")
+        return
+    required = bool((vault_cfg.get("telegram", {}) or {}).get("required"))
+    try:
+        channel.archive(vault_media_id)
+    except VaultArchiveError as exc:
+        if required:
+            raise
+        logger.warning("Archive upload failed (best-effort): %s", exc)
+
+
+def run_vault_sync(config: dict) -> int:
+    """Sync manually added channel pictures into the local vault."""
+    pipeline_cfg = config.get("pipeline", {})
+    vault_cfg = config.get("vault", {})
+    db = DBManager(pipeline_cfg.get("db_path", "data/pipeline.db"))
+    try:
+        vault = MediaVault(db, vault_cfg.get("root", "data/vault"))
+        channel = _vault_channel(db, vault_cfg)
+        if channel is None:
+            logger.error(
+                "Vault channel not configured: set vault.telegram.bot_token "
+                "and vault.telegram.chat_id."
+            )
+            return 2
+        result = channel.sync_from_channel(vault)
+        logger.info(
+            "Vault sync complete: %d new item(s), offset %d",
+            result["new"],
+            result["offset"],
+        )
+        return 0
+    except VaultArchiveError as exc:
+        logger.error("Vault sync failed: %s", exc)
+        return 1
+    finally:
+        db.close()
+
+
+def run_resolve_chat(config: dict, bot_token: str | None = None) -> int:
+    """Resolve the vault channel's numeric chat id and print it."""
+    vault_cfg = config.get("vault", {})
+    telegram_cfg = vault_cfg.get("telegram", {}) or {}
+    token = bot_token or telegram_cfg.get("bot_token", "")
+    if not token:
+        logger.error(
+            "No vault bot token. Pass --vault-bot-token or set "
+            "vault.telegram.bot_token."
+        )
+        return 2
+    try:
+        chat_id = TelegramVault.resolve_channel_id(token)
+    except VaultArchiveError as exc:
+        logger.error("%s", exc)
+        return 1
+    print(f"CHAT_ID={chat_id}")
+    return 0
+
+
 def run_pipeline(
     config: dict,
     account_key: str,
     media_path: str,
     *,
     dry_run: bool = True,
+    media_source: str = "drop",
 ) -> int:
     pipeline_cfg = config.get("pipeline", {})
     ollama_cfg = config.get("ollama", {})
@@ -82,15 +162,38 @@ def run_pipeline(
 
     db = DBManager(pipeline_cfg.get("db_path", "data/pipeline.db"))
     try:
-        post_id = db.create_post(account_key=account_key, media_path=str(ml))
+        media_vault = None
+        canonical_path = ml
+        if vault_cfg:
+            media_vault = MediaVault(db, vault_cfg.get("root", "data/vault"))
+            if not dry_run:
+                channel = _vault_channel(db, vault_cfg)
+                if channel is not None:
+                    sync_result = channel.sync_from_channel(media_vault)
+                    logger.info("Vault auto-sync: %s", sync_result)
+            try:
+                vault_media_id = media_vault.ingest(ml, source=media_source)
+            except MediaNotSupportedError as exc:
+                logger.error("Media rejected by vault: %s", exc)
+                return 2
+            canonical_path = media_vault.path_of(vault_media_id)
+
+        post_id = db.create_post(
+            account_key=account_key, media_path=str(canonical_path)
+        )
+        if media_vault is not None:
+            db.set_post_vault_media(post_id, vault_media_id)
+            _archive_vault_asset(
+                db, vault_cfg, vault_media_id, dry_run=dry_run
+            )
 
         analyzer = VisualAnalyzer(
             base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
             model=ollama_cfg.get("vision_model", "qwen2-vl"),
             timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
         )
-        logger.info("Analyzing %s with %s ...", ml, analyzer.model)
-        description = analyzer.analyze(str(ml))
+        logger.info("Analyzing %s with %s ...", canonical_path, analyzer.model)
+        description = analyzer.analyze(str(canonical_path))
         db.update_content(post_id, vision_description=description)
 
         personas = PersonaStore(
@@ -138,7 +241,7 @@ def run_pipeline(
                 or (approval_cfg.get("notify_chat_id") or None)
             ),
         )
-        decision = gateway.request_approval(post_id, str(ml), caption)
+        decision = gateway.request_approval(post_id, str(canonical_path), caption)
         logger.info("Approval decision: %s", decision)
 
         if decision.get("action") == "retry":
@@ -178,10 +281,12 @@ def run_pipeline(
             host = build_media_host(vault_cfg)
             public_url = None
             if host.is_configured():
-                public_url = host.upload(ml)
+                public_url = host.upload(canonical_path)
                 logger.info("Media hosted at %s", public_url)
+                if media_vault is not None:
+                    db.set_public_url(vault_media_id, public_url)
             container_id = publisher.create_media_container(
-                ml, effective_caption, image_url=public_url
+                canonical_path, effective_caption, image_url=public_url
             )
             db.set_publishing_result(post_id, ig_container_id=container_id)
             logger.info("Container created: %s", container_id)
@@ -225,12 +330,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--account",
         choices=["cat_1", "cat_2"],
-        required=True,
+        required=False,
         help="Which cat persona to use",
     )
     parser.add_argument(
         "--media",
-        required=True,
+        required=False,
         help="Path to the photo/video to process",
     )
     parser.add_argument(
@@ -239,9 +344,34 @@ def main(argv: list[str] | None = None) -> int:
         help="Prevent any real network calls to Ollama/Meta/Telegram "
         "(auto-approves) for safe smoke testing",
     )
+    parser.add_argument(
+        "--sync-vault",
+        action="store_true",
+        help="Pull operator-added pictures from the vault channel into the "
+        "local vault and exit",
+    )
+    parser.add_argument(
+        "--resolve-chat",
+        action="store_true",
+        help="Resolve the vault channel's numeric chat id and print it",
+    )
+    parser.add_argument(
+        "--vault-bot-token",
+        default=None,
+        help="Override the vault bot token used by --resolve-chat",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
+
+    if args.sync_vault:
+        return run_vault_sync(cfg)
+    if args.resolve_chat:
+        return run_resolve_chat(cfg, bot_token=args.vault_bot_token)
+
+    if not args.account or not args.media:
+        parser.error("--account and --media are required for a pipeline run")
+        return 2
 
     if args.dry_run:
         # In dry-run, skip live Ollama/Telegram entirely to keep the smoke
@@ -274,7 +404,23 @@ def run_dry_run_pipeline(
 
     db = DBManager(pipeline_cfg.get("db_path", "data/pipeline.db"))
     try:
-        post_id = db.create_post(account_key=account_key, media_path=str(ml))
+        media_vault = None
+        canonical_path = ml
+        vault_cfg = config.get("vault", {})
+        if vault_cfg:
+            media_vault = MediaVault(db, vault_cfg.get("root", "data/vault"))
+            try:
+                vault_media_id = media_vault.ingest(ml, source="drop")
+            except MediaNotSupportedError as exc:
+                logger.error("Media rejected by vault: %s", exc)
+                return 2
+            canonical_path = media_vault.path_of(vault_media_id)
+
+        post_id = db.create_post(
+            account_key=account_key, media_path=str(canonical_path)
+        )
+        if media_vault is not None:
+            db.set_post_vault_media(post_id, vault_media_id)
 
         personas = PersonaStore(
             persona_cfg.get("config_path", "config/personas.json")

@@ -9,13 +9,24 @@ from .media_host import (
     S3Host,
     build_media_host,
 )
+from .media_vault import (
+    MediaNotSupportedError,
+    MediaVault,
+    MediaVaultError,
+)
+from .telegram_archive import TelegramVault, VaultArchiveError
 
 __all__ = [
     "MediaHost",
     "MediaHostConfigError",
     "MediaHostError",
+    "MediaNotSupportedError",
+    "MediaVault",
+    "MediaVaultError",
     "NoHost",
     "R2Host",
     "S3Host",
+    "TelegramVault",
+    "VaultArchiveError",
     "build_media_host",
 ]

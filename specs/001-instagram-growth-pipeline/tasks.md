@@ -114,26 +114,26 @@ archive + idempotent channel sync (US4).
 
 ### Implementation for User Story 4
 
-- [ ] T016 [P] [US4] Implement `src/vault/media_vault.py` — `ingest(path, source,
+- [X] T016 [P] [US4] Implement `src/vault/media_vault.py` — `ingest(path, source,
       delete_source=False)` hashes (sha256), dedups against `vault_media`,
       copies into `data/vault/<yyyymm>/<sha[:12]>.ext`, inserts row, returns
       `vault_media_id`; reusable for drop / ai_generated / telegram
-- [ ] T017 [P] [US4] Implement `src/vault/telegram_archive.py` —
+- [X] T017 [P] [US4] Implement `src/vault/telegram_archive.py` —
       `archive(vault_media_id)` uploads Document with `sha256:<hash>` caption,
       `download_file(file_id)` size-verified, `resolve_chat_id(chat_ref)`,
       `sync_from_channel(offset)` -> new-vault-items + next offset; raises
       `VaultArchiveError` on failure
-- [ ] T018 [US4] Add `--sync-vault` and `--resolve-chat` subcommands to `main.py`
+- [X] T018 [US4] Add `--sync-vault` and `--resolve-chat` subcommands to `main.py`
       (vault-agent CLI per contracts/telegram-protocol.md Part B)
-- [ ] T019 [US4] Hook ingest+archive into `run_pipeline` in `main.py`: ingest
+- [X] T019 [US4] Hook ingest+archive into `run_pipeline` in `main.py`: ingest
       media (drop) -> archive to channel (best-effort, respecting
       `vault.telegram.required`) -> link post via `set_post_vault_media`,
       storing `public_url` when a host is configured
-- [ ] T020 [US4] Auto-run vault channel sync at the start of every non-dry-run
+- [X] T020 [US4] Auto-run vault channel sync at the start of every non-dry-run
       submit in `main.py` (FR-015) when vault telegram configured
-- [ ] T021 [US4] Support AI-generated media: `ingest(..., source="ai_generated")`
+- [X] T021 [US4] Support AI-generated media: `ingest(..., source="ai_generated")`
       reusable from `main.py` for future generation output (US4/AC1 scope)
-- [ ] T022 [US4] Tests: vault dedup/reuse + channel sync idempotency in
+- [X] T022 [US4] Tests: vault dedup/reuse + channel sync idempotency in
       `tests/unit/test_vault.py` and `tests/unit/test_telegram_archive.py`
       (mock httpx/Telegram + boto3)
 
