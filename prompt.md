@@ -1,1 +1,1 @@
-/speckit.constitution — establish project principles
+continue following all the steps until a human in the loop is needed 
