@@ -15,7 +15,6 @@ video/Reel support can be added without affecting the image path.
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import requests
 

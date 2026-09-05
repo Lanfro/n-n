@@ -12,9 +12,8 @@ reaches the publisher without a recorded, human-approved state.
 
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 # Valid post statuses
 PENDING_ANALYSIS = "PENDING_ANALYSIS"
@@ -65,7 +64,7 @@ CREATE TABLE IF NOT EXISTS posts (
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class DBManager:
@@ -101,14 +100,14 @@ class DBManager:
             self._conn.commit()
             return int(cur.lastrowid)
 
-    def get_post(self, post_id: int) -> Optional[dict]:
+    def get_post(self, post_id: int) -> dict | None:
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM posts WHERE id = ?", (post_id,)
             ).fetchone()
             return dict(row) if row else None
 
-    def list_posts(self, status: Optional[str] = None) -> list[dict]:
+    def list_posts(self, status: str | None = None) -> list[dict]:
         with self._lock:
             if status:
                 rows = self._conn.execute(

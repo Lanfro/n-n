@@ -7,7 +7,6 @@ rest of the pipeline degrades gracefully instead of crashing.
 
 import base64
 from pathlib import Path
-from typing import Optional
 
 import requests
 

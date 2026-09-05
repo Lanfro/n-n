@@ -11,7 +11,6 @@ text model to produce structured Instagram output:
 import json
 import re
 from pathlib import Path
-from typing import Optional
 
 import requests
 
@@ -134,7 +133,7 @@ VISUAL CONTEXT:
         persona: dict,
         vision_description: str,
         *,
-        system_override: Optional[str] = None,
+        system_override: str | None = None,
     ) -> dict:
         """Generate and return {reel_text, caption, hashtags}."""
         if system_override:

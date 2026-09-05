@@ -8,12 +8,19 @@ See `CONTEXT.md` and `plan/instagram_growth_ai_agent_plan.md` for the full spec.
 ## Quick start
 
 ```bash
-pip install -r requirements.txt
-python main.py --account cat_1 --media data/input_media/photo.jpg --dry-run
+uv sync
+uv run main.py --account cat_1 --media data/input_media/photo.jpg --dry-run
 ```
 
 `--dry-run` runs the whole pipeline (DB, approval, publisher) without calling
 Ollama, Telegram, or Meta.
+
+Lint/test with the dev group:
+
+```bash
+uv run ruff check src main.py
+uv run pytest
+```
 
 ## Config
 

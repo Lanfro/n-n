@@ -10,9 +10,8 @@ and testable without credentials.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
@@ -89,14 +88,14 @@ class TelegramGateway:
         self,
         db: DBManager,
         bot_token: str = "",
-        allowed_chat_ids: Optional[list[int]] = None,
+        allowed_chat_ids: list[int] | None = None,
         decision_timeout_seconds: int = 1800,
     ):
         self.db = db
         self.bot_token = bot_token
         self.allowed_chat_ids = set(allowed_chat_ids or [])
         self.timeout = decision_timeout_seconds
-        self._fallback_reason: Optional[str] = None
+        self._fallback_reason: str | None = None
 
     @property
     def available(self) -> bool:
@@ -150,9 +149,9 @@ class TelegramGateway:
                 ),
             )
             # Poll for a decision
-            deadline = datetime.now(timezone.utc).timestamp() + self.timeout
+            deadline = datetime.now(UTC).timestamp() + self.timeout
             decision = None
-            while datetime.now(timezone.utc).timestamp() < deadline:
+            while datetime.now(UTC).timestamp() < deadline:
                 pending = _pending.get(message.chat_id)
                 if pending and pending.get("action"):
                     decision = pending["action"]
@@ -193,7 +192,7 @@ class TelegramGateway:
             self._fallback_reason = f"Telegram failed ({exc}); using CLI approval."
             logger.warning(self._fallback_reason)
             return self._request_via_cli(post_id, media_path, caption)
-        except Exception as exc:  # asyncio/network issues -> CLI fallback
+        except Exception as exc:  # noqa: BLE001 - asyncio/network -> CLI fallback
             self._fallback_reason = f"Telegram error ({exc}); using CLI approval."
             logger.warning(self._fallback_reason)
             return self._request_via_cli(post_id, media_path, caption)

@@ -184,13 +184,13 @@ def run_pipeline(
         db.set_publishing_result(post_id, meta_error=str(exc))
         db.transition(post_id, "FAILED")
         return 1
-    except Exception as exc:  # noqa: BLE001 - CLI should not crash on unexpected
-        logger.exception("Pipeline failed: %s", exc)
+    except Exception as exc:
+        logger.exception("Pipeline failed")
         try:
             db.set_publishing_result(post_id, meta_error=str(exc))
             db.transition(post_id, "FAILED")
-        except Exception:
-            pass
+        except Exception as cleanup_exc:  # noqa: BLE001
+            logger.warning("Failed to record pipeline failure: %s", cleanup_exc)
         return 1
     finally:
         db.close()
@@ -312,12 +312,12 @@ def run_dry_run_pipeline(
             post["status"],
         )
         return 0
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("DRY-RUN failed: %s", exc)
+    except Exception:
+        logger.exception("DRY-RUN failed")
         try:
             db.transition(post_id, "FAILED")
-        except Exception:
-            pass
+        except Exception as cleanup_exc:  # noqa: BLE001
+            logger.warning("Failed to mark DRY-RUN post failed: %s", cleanup_exc)
         return 1
     finally:
         db.close()
