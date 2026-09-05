@@ -11,6 +11,7 @@ Usage:
 import argparse
 import logging
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -22,7 +23,11 @@ from src.publisher.meta_publisher import MetaPublisher
 from src.vault.media_host import build_media_host
 from src.vault.media_vault import MediaNotSupportedError, MediaVault
 from src.vault.telegram_archive import TelegramVault, VaultArchiveError
-from src.vision.visual_analyzer import OllamaUnavailableError, VisualAnalyzer
+from src.vision.visual_analyzer import (
+    DEFAULT_PROMPT,
+    OllamaUnavailableError,
+    VisualAnalyzer,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -109,6 +114,107 @@ def run_vault_sync(config: dict) -> int:
     except VaultArchiveError as exc:
         logger.error("Vault sync failed: %s", exc)
         return 1
+    finally:
+        db.close()
+
+
+def _write_descriptions_report(
+    report_path: Path, model: str, rows: list[tuple[dict, str | None, str | None]]
+) -> Path:
+    """Write the human-reviewable AI descriptions digest."""
+    lines = [
+        f"# Vault AI Descriptions ({model})",
+        f"Generated {datetime.now(UTC).isoformat()}",
+        "",
+    ]
+    for asset, description, error in rows:
+        lines.append(f"## Asset #{asset['id']} — {asset['original_filename']}")
+        if error:
+            lines.append(f"_{error}_")
+        else:
+            lines.append(description)
+        lines.append(f"`{asset['stored_path']}`")
+        lines.append("")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return report_path
+
+
+def run_describe_vault(config: dict) -> int:
+    """Batch vision descriptions for vault image assets (T034).
+
+    Runs the same vision model as the pipeline over every image asset that has
+    no stored description yet (skips videos), persists each description in
+    `vault_analysis`, and writes a `data/descriptions.md` digest for review.
+    Idempotent: re-running only covers assets still missing a description.
+    """
+    pipeline_cfg = config.get("pipeline", {})
+    ollama_cfg = config.get("ollama", {})
+    model = ollama_cfg.get("vision_model", "qwen3-vl:8b")
+    report_path = Path(
+        pipeline_cfg.get("descriptions_report", "data/descriptions.md")
+    )
+
+    db = DBManager(pipeline_cfg.get("db_path", "data/pipeline.db"))
+    try:
+        assets = db.list_vault_media("image")
+        if not assets:
+            logger.info("No image assets in the vault; nothing to describe")
+            return 0
+        missing = [
+            a
+            for a in assets
+            if db.get_vault_analysis(a["id"], model) is None
+        ]
+        if not missing:
+            logger.info(
+                "All %d image assets already have %s descriptions",
+                len(assets),
+                model,
+            )
+            return 0
+
+        analyzer = VisualAnalyzer(
+            base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
+            model=model,
+            timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
+        )
+        logger.info(
+            "Describing %d image asset(s) with %s (sequential)",
+            len(missing),
+            model,
+        )
+        rows: list[tuple[dict, str | None, str | None]] = []
+        for i, asset in enumerate(missing, start=1):
+            path = Path(asset["stored_path"])
+            if not path.exists():
+                logger.warning(
+                    "Asset #%d stored file missing: %s", asset["id"], path
+                )
+                rows.append((asset, None, "file missing"))
+                continue
+            try:
+                description = analyzer.analyze(path, DEFAULT_PROMPT)
+            except OllamaUnavailableError as exc:
+                logger.error("Ollama unavailable; stopping batch: %s", exc)
+                break
+            db.upsert_vault_analysis(
+                vault_media_id=asset["id"],
+                model=model,
+                prompt=DEFAULT_PROMPT,
+                description=description,
+            )
+            rows.append((asset, description, None))
+            print(
+                f"[{i}/{len(missing)}] asset #{asset['id']} "
+                f"{path.name}: {description[:160]}"
+            )
+
+        _write_descriptions_report(report_path, model, rows)
+        logger.info(
+            "Wrote %d description(s) to %s", len(rows), report_path
+        )
+        return 0
     finally:
         db.close()
 
@@ -504,6 +610,12 @@ def main(argv: list[str] | None = None) -> int:
         "local vault and exit",
     )
     parser.add_argument(
+        "--describe-vault",
+        action="store_true",
+        help="Batch-run vision descriptions (qwen3-vl) over every vault image "
+        "asset that lacks one and write data/descriptions.md, then exit",
+    )
+    parser.add_argument(
         "--resolve-chat",
         action="store_true",
         help="Resolve the vault channel's numeric chat id and print it",
@@ -530,6 +642,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.sync_vault:
         return run_vault_sync(cfg)
+    if args.describe_vault:
+        return run_describe_vault(cfg)
     if args.resolve_chat:
         return run_resolve_chat(cfg, bot_token=args.vault_bot_token)
     if args.retry:

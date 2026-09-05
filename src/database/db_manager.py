@@ -82,6 +82,16 @@ CREATE TABLE IF NOT EXISTS channel_sync (
     last_update_id INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS vault_analysis (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vault_media_id INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    prompt TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (vault_media_id, model)
+);
 """
 
 VAULT_SOURCES = {"drop", "ai_generated", "telegram"}
@@ -243,6 +253,73 @@ class DBManager:
             ).fetchone()
             return dict(row) if row else None
 
+    def list_vault_media(self, media_type: str | None = None) -> list[dict]:
+        """All vault assets, optionally filtered by media_type."""
+        with self._lock:
+            if media_type:
+                rows = self._conn.execute(
+                    "SELECT * FROM vault_media WHERE media_type = ? ORDER BY id",
+                    (media_type,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM vault_media ORDER BY id"
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Vault analysis (per-asset AI vision descriptions)
+    # ------------------------------------------------------------------
+
+    def upsert_vault_analysis(
+        self,
+        *,
+        vault_media_id: int,
+        model: str,
+        prompt: str = "",
+        description: str,
+    ) -> None:
+        """Store/refresh a vision description for a vault asset."""
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO vault_analysis
+                    (vault_media_id, model, prompt, description, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(vault_media_id, model) DO UPDATE SET
+                    prompt = excluded.prompt,
+                    description = excluded.description,
+                    created_at = excluded.created_at
+                """,
+                (vault_media_id, model, prompt, description, _utcnow()),
+            )
+            self._conn.commit()
+
+    def get_vault_analysis(
+        self, vault_media_id: int, model: str | None = None
+    ) -> dict | None:
+        """Most recent stored analysis for an asset (optionally per model)."""
+        with self._lock:
+            if model:
+                row = self._conn.execute(
+                    """
+                    SELECT * FROM vault_analysis
+                     WHERE vault_media_id = ? AND model = ?
+                     ORDER BY created_at DESC, id DESC LIMIT 1
+                    """,
+                    (vault_media_id, model),
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    """
+                    SELECT * FROM vault_analysis
+                     WHERE vault_media_id = ?
+                     ORDER BY created_at DESC, id DESC LIMIT 1
+                    """,
+                    (vault_media_id,),
+                ).fetchone()
+            return dict(row) if row else None
+
     def insert_vault_media(
         self,
         *,
@@ -332,6 +409,10 @@ class DBManager:
         Duplicate media (same sha256) backs the same `vault_media_id`, so a
         later post of the same picture reuses this analysis instead of running
         the vision model again (US4/AC2, data-model.md invariant).
+
+        Checks per-post descriptions first (historical pipeline runs), then
+        falls back to the per-asset `vault_analysis` table written by the
+        batch `--describe-vault` tool.
         """
         with self._lock:
             row = self._conn.execute(
@@ -345,7 +426,18 @@ class DBManager:
                 """,
                 (vault_media_id,),
             ).fetchone()
-            return row[0] if row else None
+            if row:
+                return row[0]
+            arow = self._conn.execute(
+                """
+                SELECT description FROM vault_analysis
+                 WHERE vault_media_id = ?
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1
+                """,
+                (vault_media_id,),
+            ).fetchone()
+            return arow[0] if arow else None
 
     def get_channel_offset(self) -> int:
         with self._lock:

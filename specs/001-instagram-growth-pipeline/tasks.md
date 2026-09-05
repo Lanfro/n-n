@@ -181,6 +181,26 @@ channel adds sync into the vault without duplicates.
 
 ---
 
+## Phase 7: Batch Vision Descriptions (focus on picture AI generation)
+
+**Purpose**: Ingest the real picture backlog and batch-generate qwen3-vl
+descriptions per vault asset so the user can sanity-check what the model
+"sees" before writing captions.
+
+- [X] T033 Add a `vault_analysis` table (`vault_media_id`, `model`, `prompt`,
+      `description`, `created_at`, `UNIQUE(vault_media_id, model)`) with
+      `list_vault_media()`, `upsert_vault_analysis()`,
+      `get_vault_analysis()` in `src/database/db_manager.py`
+- [X] T034 Add `--describe-vault` CLI in `main.py` (`run_describe_vault`)
+      that runs the pipeline vision model (qwen3-vl) sequentially over every
+      image asset lacking a description (skips videos), persists results, and
+      writes a `data/descriptions.md` digest; re-runs are idempotent
+- [X] T035 Make `get_latest_vision_for_vault` fall back to the per-asset
+      `vault_analysis` table so batch descriptions feed the caption generator
+      (`--retry`/`run_pipeline`) for future drafts
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
