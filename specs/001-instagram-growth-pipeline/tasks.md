@@ -45,19 +45,19 @@ deltas (HITL alert FR-016, hosted publish URL FR-017).
 
 **Purpose**: DB schema + manager support every story; nothing else can start.
 
-- [ ] T004 Add `vault_media` table to `_SCHEMA` in
+- [X] T004 Add `vault_media` table to `_SCHEMA` in
       `src/database/db_manager.py` per data-model.md (sha256 UNIQUE, source,
       telegram_file_id/message_id, public_url, media_type, size_bytes)
-- [ ] T005 Add `channel_sync` table to `_SCHEMA` in `src/database/db_manager.py`
+- [X] T005 Add `channel_sync` table to `_SCHEMA` in `src/database/db_manager.py`
       (single-row offset cursor)
-- [ ] T006 Add `vault_media_id` column to the `posts` table in
+- [X] T006 Add `vault_media_id` column to the `posts` table in
       `src/database/db_manager.py`
-- [ ] T007 Implement vault CRUD + sync-offset helpers on `DBManager` in
+- [X] T007 Implement vault CRUD + sync-offset helpers on `DBManager` in
       `src/database/db_manager.py`: `get_vault_media_by_sha256`,
       `insert_vault_media`, `get_vault_media`, `set_vault_archive`,
       `set_public_url`, `set_post_vault_media`, `get_channel_offset`,
       `set_channel_offset`
-- [ ] T008 Unit tests for the new schema + helpers in
+- [X] T008 Unit tests for the new schema + helpers in
       `tests/unit/test_db_vault.py` (parallel to T007 impl)
 
 **Checkpoint**: Foundation ready — vault CRUD testable without network.
