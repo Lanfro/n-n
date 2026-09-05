@@ -1,1 +1,1 @@
-uv tool install specify-cli --from git+https://github.com/github/spec-kit.git@1.0.4
+/speckit.constitution — establish project principles
