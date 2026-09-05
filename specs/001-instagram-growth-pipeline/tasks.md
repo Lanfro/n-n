@@ -146,16 +146,38 @@ channel adds sync into the vault without duplicates.
 
 **Purpose**: Docs, lint, smoke gate, and convergence.
 
-- [ ] T023 [P] Update `CONTEXT.md` (add `src/vault/`, `data/vault/`, telegram
+- [X] T023 [P] Update `CONTEXT.md` (add `src/vault/`, `data/vault/`, telegram
       vault role, HITL alert note)
-- [ ] T024 Update `README.md` quickstart to cover `--sync-vault`,
+- [X] T024 Update `README.md` quickstart to cover `--sync-vault`,
       `--resolve-chat`, and the vault config
-- [ ] T025 [P] Run `uv run ruff check src main.py tests` and fix all findings
-- [ ] T026 Run the smoke test `uv run main.py --account cat_1 --media
+- [X] T025 [P] Run `uv run ruff check src main.py tests` and fix all findings
+- [X] T026 Run the smoke test `uv run main.py --account cat_1 --media
       data/input_media/sample_cat.jpg --dry-run` (PUBLISHED reachable)
-- [ ] T027 Run `uv run pytest` (full suite green)
-- [ ] T028 Run `/speckit.converge` to close any remaining gaps (do not modify
+- [X] T027 Run `uv run pytest` (full suite green)
+- [X] T028 Run `/speckit.converge` to close any remaining gaps (do not modify
       spec/plan; append convergence tasks if needed)
+
+---
+
+## Phase 6: Convergence
+
+**Purpose**: Close gaps found by `/speckit.converge` (2026-09-05).
+
+- [ ] T029 Add an operator CLI (e.g. `--retry --post-id N`) so a `FAILED` post
+      can be retried without repeating work — reuse the existing post row and
+      its `vault_media_id` (skip re-ingest/re-analysis), per `FR-010` /
+      `SC-006` / research.md decision 7 (`missing`)
+- [ ] T030 Reuse the latest stored `vision_description` for a `vault_media_id`
+      when a duplicate (same sha256) media is submitted again, analyzing only
+      when none is stored yet, per `US4/AC2` and the data-model.md invariant
+      (`partial`)
+- [ ] T031 Make `sync_from_channel` in `src/vault/telegram_archive.py` advance
+      the persisted offset only past items that were ingested successfully, so
+      a transient download/ingest failure is retried on the next sync instead
+      of permanently skipped, per `US4/AC3` and `SC-008` (`partial`)
+- [ ] T032 Handle `video`-keyed `channel_post` updates in `_media_file_id` in
+      `src/vault/telegram_archive.py` (alongside `photo`/`document`), per the
+      spec edge case for video media in the vault (`partial`)
 
 ---
 
