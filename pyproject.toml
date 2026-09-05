@@ -8,7 +8,7 @@ dependencies = [
     "boto3>=1.34.0",
     "pillow>=10.0.0",
     "pyyaml>=6.0",
-    "python-telegram-bot>=21.0",
+    "python-telegram-bot[callback-data]>=21.0",
     "requests>=2.31.0",
 ]
 

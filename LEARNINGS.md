@@ -30,3 +30,10 @@ entry with its date in reverse-chronological order.
   **dedicated bot token** so its long-polling (`--sync-vault`) never collides
   with the approval flow's `getUpdates` (Telegram enforces one consumer per
   token).
+- **python-telegram-bot: `Application.start()` does NOT poll.** In PTB >=20
+  `start()` only wires the update queue; you must also run
+  `await application.updater.start_polling(...)` or the inline approval buttons
+  silently do nothing (observed: 30-min approval window expired, post left
+  `AWAITING_APPROVAL`, zero `getUpdates` requests in logs). Also requires the
+  `[callback-data]` extra (`cachetools`) for `arbitrary_callback_data(True)`;
+  without it `.build()` fails at runtime ("To use `CallbackDataCache`...").

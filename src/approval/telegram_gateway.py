@@ -42,11 +42,9 @@ class ApprovalDecision:
 
 async def _approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
     chat_id = query.message.chat_id
-    if chat_id in _pending:
-        _pending[chat_id]["action"] = "approve"
-    await query.edit_message_text("Approved. Proceeding to scheduling.")
+    _pending[chat_id] = {"action": "approve"}
+    await query.answer("Approved — proceeding to scheduling.")
 
 
 async def _handle_command(
@@ -150,6 +148,16 @@ class TelegramGateway:
         async with application:
             await application.initialize()
             await application.start()
+            if application.updater is None:
+                raise RuntimeError(
+                    "Application has no Updater; cannot poll for decisions."
+                )
+            await application.updater.start_polling(
+                poll_interval=1.0,
+                timeout=10,
+                allowed_updates=["message", "callback_query"],
+                drop_pending_updates=True,
+            )
 
             bot: Bot = application.bot
             message = await bot.send_photo(
@@ -182,6 +190,7 @@ class TelegramGateway:
                     break
                 await asyncio.sleep(2)
 
+            await application.updater.stop()
             await application.stop()
             await application.shutdown()
 
