@@ -150,7 +150,10 @@ def run_describe_vault(config: dict) -> int:
     Runs the same vision model as the pipeline over every image asset that has
     no stored description yet (skips videos), persists each description in
     `vault_analysis`, and writes a `data/descriptions.md` digest for review.
-    Idempotent: re-running only covers assets still missing a description.
+    Idempotent: re-running only covers assets still missing a description. A
+    failed vision call is retried once per asset, then the asset is skipped
+    (recorded as an error in the report) so one slow image does not abort the
+    rest of the batch.
     """
     pipeline_cfg = config.get("pipeline", {})
     ollama_cfg = config.get("ollama", {})
@@ -201,8 +204,23 @@ def run_describe_vault(config: dict) -> int:
             try:
                 description = analyzer.analyze(path, DESCRIBE_PROMPT)
             except OllamaUnavailableError as exc:
-                logger.error("Ollama unavailable; stopping batch: %s", exc)
-                break
+                logger.warning(
+                    "Vision call failed for asset #%d (%s), retrying once: %s",
+                    asset["id"],
+                    path.name,
+                    exc,
+                )
+                try:
+                    description = analyzer.analyze(path, DESCRIBE_PROMPT)
+                except OllamaUnavailableError as exc2:
+                    logger.warning(
+                        "Skipping asset #%d (%s): %s",
+                        asset["id"],
+                        path.name,
+                        exc2,
+                    )
+                    rows.append((asset, None, f"analysis failed: {exc2}"))
+                    continue
             except Exception as exc:  # noqa: BLE001 - one bad image not fatal
                 logger.warning(
                     "Failed to describe asset #%d (%s): %s",

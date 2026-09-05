@@ -199,3 +199,67 @@ def test_describe_batch_continues_on_per_asset_error(tmp_path, monkeypatch) -> N
     assert "a great cat photo" in report
     assert "analysis failed" in report
     assert "simulated failure" in report
+
+
+def test_describe_batch_retries_once_then_skips(tmp_path, monkeypatch) -> None:
+    """First Ollama failure is retried; second failure skips, batch continues."""
+    import main
+    from src.vision.visual_analyzer import OllamaUnavailableError
+
+    db = DBManager(tmp_path / "pipeline.db")
+    vault = MediaVault(db, tmp_path / "vault")
+    _make_jpeg(tmp_path, 100, 100, "a.jpg", color="orange")
+    _make_jpeg(tmp_path, 90, 100, "b.jpg", color="purple")
+    _make_jpeg(tmp_path, 80, 100, "c.jpg", color="green")
+    for name in ("a.jpg", "b.jpg", "c.jpg"):
+        vault.ingest(tmp_path / name, source="telegram")
+    # Map stored hash filename -> original name so the mock is deterministic.
+    by_name = {
+        Path(a["stored_path"]).name: a["original_filename"]
+        for a in db.list_vault_media("image")
+    }
+    db.close()
+
+    config = {
+        "pipeline": {
+            "db_path": str(tmp_path / "pipeline.db"),
+            "descriptions_report": str(tmp_path / "descriptions.md"),
+        },
+        "ollama": {
+            "base_url": "http://localhost:11434",
+            "vision_model": "qwen3-vl:8b",
+            "timeout_seconds": 10,
+        },
+    }
+
+    hits = {}
+
+    def analyze(self, path, prompt):
+        name = by_name[Path(path).name]
+        hits[name] = hits.get(name, 0) + 1
+        if name == "c.jpg":  # always fails
+            raise OllamaUnavailableError("permanent timeout")
+        if name == "b.jpg" and hits[name] == 1:  # fails once, then succeeds
+            raise OllamaUnavailableError("once only")
+        return f"canned-{name}"
+
+    monkeypatch.setattr(main.VisualAnalyzer, "analyze", analyze)
+    code = main.run_describe_vault(config)
+    assert code == 0
+
+    db = DBManager(tmp_path / "pipeline.db")
+    rows = {
+        a["original_filename"]: db.get_vault_analysis(a["id"], "qwen3-vl:8b")
+        for a in db.list_vault_media("image")
+    }
+    # a: success, b: retried then success, c: skipped with no analysis
+    assert rows["a.jpg"]["description"] == "canned-a.jpg"
+    assert rows["b.jpg"]["description"] == "canned-b.jpg"
+    assert rows["c.jpg"] is None
+    assert hits["b.jpg"] == 2  # retried once
+    assert hits["c.jpg"] == 2  # first attempt + retry, both skipped
+    db.close()
+
+    report = (tmp_path / "descriptions.md").read_text(encoding="utf-8")
+    assert "permanent timeout" in report
+    assert len([l for l in report.splitlines() if l.startswith("## Asset")]) == 3
