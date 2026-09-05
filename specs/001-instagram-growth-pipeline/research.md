@@ -83,3 +83,43 @@ context, industry best practice, and platform requirements. No
   the row gives the operator a clear reason (FR-010).
 - **Alternatives considered**: silent retry loops (rejected — masks failures);
   throwing fatal errors (rejected — poor operator experience).
+
+## 8. Media vault & Telegram archive
+
+- **Decision**: All cat pictures live in a private Telegram channel (archive +
+  training corpus), mirrored locally in a content-addressed vault
+  (`data/vault/<yyyymm>/<sha[:12]>.jpg`) whose SQLite index is the authority.
+  Archive uploads use `sendDocument` with a `sha256:<hash>` caption so originals
+  are byte-preserved (sendPhoto recompresses/strips EXIF). A dedicated vault bot
+  token is used.
+- **Rationale**: Free, phone-accessible, durable off-machine backup that the
+  operator can also add to by hand; content-addressing gives exact dedup;
+  keeping a local index preserves Local-First and makes the corpus queryable.
+- **Alternatives considered**: raw folders only (no off-machine backup),
+  sendPhoto (recompresses — rejected), git LFS for media (overkill at this
+  scale), using the approval bot token (risks Telegram 409 `getUpdates`
+  conflicts — rejected).
+
+## 9. Live-publish media hosting (R2/S3)
+
+- **Decision**: The vault exposes a `MediaHost` interface; the default backend
+  is Cloudflare R2 via `boto3` with an `endpoint_url` override and a public
+  base URL; generic S3 buckets are supported; a `NoHost` backend keeps the
+  current fail-loud `file://` behavior when nothing is configured.
+- **Rationale**: Meta must fetch the image from a public URL (Graph API
+  `image_url`); R2 has zero egress fees for the upload pattern and is
+  S3-compatible, so one boto3 code path covers R2/MinIO/S3.
+- **Alternatives considered**: Telegram-hosted URLs (require the bot token —
+  leaking it to Meta; rejected), local web server + tunnel (extra moving parts).
+- **Constraint**: the vault/Telegram channel is never the publish URL source.
+
+## 10. Vault channel sync (operator hand-adds)
+
+- **Decision**: `--sync-vault` performs a one-shot `getUpdates` poll for
+  `channel_post` media, deduplicated by an offset cursor persisted in
+  `channel_sync`; new pictures are downloaded and ingested as `source=telegram`.
+  Sync also auto-runs at the start of every submit.
+- **Rationale**: The operator adds pictures by hand to teach the model; polling
+  with a persisted offset is idempotent and needs no long-running server.
+- **Alternatives considered**: webhook (requires public URL + TLS — overkill);
+  scheduled background service (not wanted yet).

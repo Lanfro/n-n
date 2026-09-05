@@ -65,7 +65,57 @@ uv run pytest        # once the test suite exists (added in implementation phase
 created, published, and the row reaches `PUBLISHED` with `ig_media_id`.
 **Caution**: `meta.dry_run` defaults to `true`; set it `false` explicitly to
 publish for real. Media must be reachable at a public URL (see
-[meta-graph-api.md](contracts/meta-graph-api.md)).
+[meta-graph-api.md](contracts/meta-graph-api.md) + [media-host.md](contracts/media-host.md)).
+
+## Scenario 5 — Media vault dedup (no network)
+
+Submit the same photo to both accounts and inspect the vault:
+
+```
+uv run main.py --account cat_1 --media data/input_media/sample_cat.jpg --dry-run
+uv run main.py --account cat_2 --media data/input_media/sample_cat.jpg --dry-run
+```
+
+**Expected**: one `vault_media` row (same `sha256`), one stored file in
+`data/vault/<yyyymm>/<sha[:12]>.jpg`, both posts reference the same
+`vault_media_id`. With `vault.telegram` configured, only ONE Document lands in
+the channel.
+
+**Proves**: FR-013/FR-014 (dedup + content-addressed archive).
+
+## Scenario 6 — HITL alert (sound + Telegram notification)
+
+```
+uv run main.py --account cat_1 --media data/input_media/photo.jpg
+```
+
+**Expected**: on reaching `AWAITING_APPROVAL` a sound plays and (if configured)
+a Telegram message "Post #N awaiting your approval" is sent, then the CLI
+prompt (or Telegram buttons) wait. With `approval.sound: false`, no sound.
+
+**Proves**: FR-016 (operator alerted before blocking).
+
+## Scenario 7 — Vault channel sync (operator hand-adds)
+
+1. Manually post a new photo to the private vault channel.
+2. `uv run main.py --sync-vault`; then re-run `--sync-vault`.
+
+**Expected**: run 1 ingests the picture (`source=telegram`) into the vault; run
+2 reports zero new items (idempotent — offset persisted in `channel_sync`).
+
+**Proves**: FR-015, SC-008.
+
+## Scenario 8 — Live publish with hosted media (R2 configured)
+
+1. Configure `vault.host.backend: r2` + credentials in `config.local.yaml`.
+2. Set `meta.dry_run: false`.
+3. Submit a photo.
+
+**Expected**: ingest → archive to channel → `MediaHost.upload` returns a public
+URL → container created → published → post `PUBLISHED` with `ig_media_id` and
+`vault_media.public_url` set.
+
+**Proves**: FR-017, [media-host.md](contracts/media-host.md).
 
 ## References
 
@@ -73,3 +123,4 @@ publish for real. Media must be reachable at a public URL (see
 - Local AI contract: [contracts/ollama-api.md](contracts/ollama-api.md)
 - Publishing contract: [contracts/meta-graph-api.md](contracts/meta-graph-api.md)
 - Approval contract: [contracts/telegram-protocol.md](contracts/telegram-protocol.md)
+- Media hosting contract: [contracts/media-host.md](contracts/media-host.md)

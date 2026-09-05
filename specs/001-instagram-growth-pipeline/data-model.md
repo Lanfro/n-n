@@ -22,11 +22,45 @@ The core tracked unit — one submitted piece of media with its lifecycle state.
 | `ig_container_id` | text (nullable) | Graph API container id | set after container creation |
 | `ig_media_id` | text (nullable) | Published media id | set after successful publish |
 | `meta_error` | text (nullable) | Last failure reason | set when a stage fails |
+| `vault_media_id` | integer (nullable) FK | Backing media asset in the vault | set on ingest; one asset serves many posts |
 | `created_at` / `updated_at` | text (ISO-8601 UTC) | Timestamps | auto-managed |
 
 **Relationships**: a Post belongs to exactly one account (`account_key`); it may
 have one "current" draft (the latest generated content); it references at most
-one approved decision gate.
+one approved decision gate; it references at most one `VaultMedia` (a single
+unique image can back many posts on either account).
+
+## VaultMedia (vault_media table)
+
+The content-addressed archive entry for one unique media file.
+
+| Field | Type | Description | Validation |
+|---|---|---|---|
+| `id` | integer PK | Stable row id | auto-increment |
+| `sha256` | text UNIQUE | Content hash = dedup key | 64 hex chars; unique across vault |
+| `original_filename` | text | Name as first seen | non-empty |
+| `stored_path` | text | Canonical vault file path (`data/vault/<yyyymm>/<sha[:12]>.jpg`) | must exist when created |
+| `media_type` | text | `image` or `video` | image in v1 |
+| `size_bytes` | integer | Original file size | > 0 |
+| `source` | text | `drop` \| `ai_generated` \| `telegram` | one of the three |
+| `telegram_file_id` | text (nullable) | Telegram file_id of the archived Document | set after archive upload |
+| `telegram_message_id` | integer (nullable) | Channel message id carrying the archive copy | set after archive upload |
+| `public_url` | text (nullable) | Publically fetchable URL after R2/S3 upload | set by `MediaHost.upload` |
+| `added_at` / `last_used_at` | text (ISO-8601 UTC) | Timestamps | auto-managed |
+
+**Invariant**: `sha256` uniqueness is the single dedup rule — the same photo is
+stored/uploaded once, yet can back N posts. The stored vision analysis on any
+backed Post is reusable for future duplicates.
+
+## ChannelSync (channel_sync table)
+
+Single-row cursor for idempotent sync of the private Telegram channel.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer PK | always 1 (single row) |
+| `last_update_id` | integer | last consumed `channel_post` update id |
+| `updated_at` | text | last sync time |
 
 ## Status Machine
 

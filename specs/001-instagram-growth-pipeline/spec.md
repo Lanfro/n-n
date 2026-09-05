@@ -86,6 +86,39 @@ planned time without skipping human approval.
 
 ---
 
+### User Story 4 - Keep every cat picture in a private Telegram vault (Priority: P2)
+
+All cat pictures - dropped photos, channel uploads, and future AI-generated
+media - must be preserved in a private Telegram channel, deduplicated once per
+unique image, and made available as a training corpus ("teach the model"). The
+operator keeps adding photos directly to the channel by hand and the pipeline
+picks them up automatically.
+
+**Why this priority**: The picture collection is the brand asset and the
+training corpus; without a durable archive it vanishes with any device, and
+without the corpus the model cannot improve.
+
+**Independent Test**: Submit the same photo twice and confirm only ONE archive
+copy exists in the channel (same `sha256:<hash>` caption, one message) while two
+posts can still be generated.
+
+**Acceptance Scenarios**:
+
+1. **Given** a photo submitted through the pipeline, **When** it is processed,
+   **Then** it is archived to the private Telegram channel as a Document with a
+   `sha256:<hash>` caption, and the local vault records the archive mapping.
+2. **Given** a photo whose sha256 already exists in the vault, **When** it is
+   submitted again, **Then** no duplicate upload occurs and the stored vision
+   analysis is reused for the new post.
+3. **Given** pictures manually added to the channel by the operator, **When**
+   the sync runs, **Then** each new picture enters the local vault (source
+   `telegram`) without duplicating previously synced media.
+4. **Given** a draft awaiting approval, **When** a human decision is required,
+   **Then** the operator is alerted with a sound and/or a Telegram notification
+   and the pipeline waits.
+
+---
+
 ### Edge Cases
 
 - What happens when the media cannot be understood (corrupt file, unsupported
@@ -97,6 +130,11 @@ planned time without skipping human approval.
 - What happens when the operator approves and then regenerates a draft - which
   version is published?
 - What happens when the same photo is processed for both accounts at once?
+- What happens when the same photo is archived twice (duplicate upload)?
+- What happens when the Telegram channel or bot is unavailable during archive?
+- What happens when media exceeds Telegram's size limits or is a video?
+- What happens when live publishing is enabled but no public media URL is
+  configured?
 
 ## Requirements *(mandatory)*
 
@@ -129,6 +167,21 @@ planned time without skipping human approval.
 - **FR-012**: When the operator takes no decision within a configured timeout,
   the system MUST leave the post unresolved (not publish, not discard) and
   notify the operator.
+- **FR-013**: The system MUST archive every unique piece of media to the private
+  Telegram vault channel as a Document with a `sha256:<hash>` caption, exactly
+  once per unique file (deduplication by content hash).
+- **FR-014**: The system MUST maintain a local media vault (content-addressed
+  store + index) that records, for each unique file, its hash, source
+  (`drop` | `ai_generated` | `telegram`), storage path, and Telegram archive
+  mapping.
+- **FR-015**: The system MUST sync pictures that the operator manually adds to
+  the Telegram vault channel into the local vault, idempotently (no duplicates
+  on re-run).
+- **FR-016**: When a human decision is required, the system MUST alert the
+  operator (sound and/or Telegram message) before waiting.
+- **FR-017**: When live publishing is enabled, the system MUST supply a publicly
+  fetchable media URL (R2/S3 via the vault `MediaHost`) to the Meta Graph API;
+  otherwise live publishing MUST fail loudly.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -144,6 +197,11 @@ planned time without skipping human approval.
 - **Approval Decision**: The operator's recorded action on a post (approve,
   regenerate, discard, or none/timeout). Every approved publication references
   its decision.
+- **VaultMedia**: A unique media asset in the archive (content hash, storage
+  path, source, Telegram mapping, optional public URL). One VaultMedia can back
+  many Posts (same photo on both accounts) and feeds the training corpus.
+- **VaultChannelSync**: The last-seen update offset for the private Telegram
+  channel, making channel sync idempotent.
 
 ## Success Criteria *(mandatory)*
 
@@ -161,6 +219,11 @@ planned time without skipping human approval.
   posts) attributable to the automation across the 6-month window.
 - **SC-006**: A failed post can be retried by the operator without redoing
   analysis or rewriting from scratch.
+- **SC-007**: 100% of unique media submitted to the system ends up archived in
+  the Telegram vault channel exactly once (zero duplicate uploads, zero losses)
+  over the measurement window.
+- **SC-008**: Manual pictures added to the vault channel are synced into the
+  local vault on the next run without duplicates.
 
 ## Assumptions
 
@@ -180,3 +243,9 @@ planned time without skipping human approval.
   this baseline spec covers the post pipeline that both formats will build on.
 - Temporary network or service interruptions occur; the operator can retry
   failed posts manually.
+- All cat pictures are preserved in a private (operator-owned) Telegram
+  channel, uploaded by a dedicated vault bot as Documents so originals are not
+  recompressed.
+- The Telegram vault is an archive/training corpus only and is never used as
+  the source of Meta publishing URLs; publishing URLs come from the R2/S3
+  host.

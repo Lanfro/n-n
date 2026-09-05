@@ -22,10 +22,11 @@ status + body preview.
 
 > ### Local-file limitation
 >
-> The scaffold substitutes a `file://` URI for `image_url`. Meta cannot fetch
-> that, so live container creation fails loudly rather than publishing a
-> broken image. Operators MUST host media at a public URL (or swap in a real
-> `image_url`) before disabling dry-run. `dry_run` is on by default.
+> The `image_url` MUST be a public URL. Local unhosted media is substituted with
+> a `file://` URI that fails loudly rather than publishing a broken image.
+> The vault `MediaHost` (R2/S3 — see [media-host.md](media-host.md)) supplies
+> the real URL once `vault.host.backend` is configured. `dry_run` is on by
+> default.
 
 ## Step 2 — Publish container
 

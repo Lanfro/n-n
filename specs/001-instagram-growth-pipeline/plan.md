@@ -88,19 +88,29 @@ specs/001-instagram-growth-pipeline/
 
 ```text
 src/
-├── approval/            # Telegram gateway (+ CLI fallback)
-├── database/            # SQLite DB wrapper + status machine
+├── approval/            # Telegram gateway (+ CLI fallback), alerts (sound + notify)
+├── database/            # SQLite DB wrapper + status machine + vault tables
 ├── engine/              # Persona store + prompt/generator
 ├── publisher/           # Meta Graph API container creation/publish
+├── vault/               # media_vault (ingest/dedup), telegram_archive, media_host (R2/S3)
 └── vision/              # Ollama vision analyzer
 config/
 ├── config.yaml          # Defaults (secrets blank), seeded by config.local.yaml
 └── personas.json        # Cat 1 / Cat 2 persona definitions
 data/
-└── input_media/         # Operator drop folder
-main.py                  # CLI orchestrator
+├── input_media/         # Operator drop folder
+└── vault/               # Content-addressed media archive (<yyyymm>/<sha[:12]>.ext)
+main.py                  # CLI orchestrator (--dry-run, --sync-vault, --resolve-chat)
 tests/                   # Added in implementation phase (pytest)
 ```
+
+**Configuration additions**: a `vault:` block (`root`, `telegram.*`, `host.*`)
+and an `approval:` block (`sound`, `sound_file`, `notify_telegram`) in
+`config/config.yaml`, with real values only in gitignored `config.local.yaml`.
+
+**Human-in-the-loop alerting**: whenever a decision is required, the pipeline
+plays a sound (`winsound`, optional custom `.wav`) and sends a Telegram
+notification message before blocking, so the operator is pinged when "around".
 
 **Structure Decision**: Single-project layout mirroring the existing scaffold —
 one `src/` package with focused submodules per pipeline stage, a thin CLI
