@@ -133,6 +133,125 @@ def run_resolve_chat(config: dict, bot_token: str | None = None) -> int:
     return 0
 
 
+def _caption_from_draft(draft: dict) -> str:
+    """Assemble the final caption from a generator draft (hashtags appended)."""
+    caption = draft.get("caption", "")
+    hashtags = draft.get("hashtags") or []
+    if hashtags:
+        caption = f"{caption}\n\n" + " ".join(f"#{h}" for h in hashtags)
+    return caption
+
+
+def _caption_from_post(post: dict) -> str:
+    """Rebuild the final caption from a post's stored draft fields."""
+    caption = post.get("caption") or ""
+    hashtags = [h for h in (post.get("hashtags") or "").split(",") if h]
+    if hashtags:
+        caption = f"{caption}\n\n" + " ".join(f"#{h}" for h in hashtags)
+    return caption
+
+
+def _approve_and_publish(
+    db: DBManager,
+    config: dict,
+    post_id: int,
+    media_path: str,
+    caption: str,
+    *,
+    dry_run: bool,
+) -> int:
+    """Shared approval + publishing tail for new and resumed posts.
+
+    Moves the post through AWAITING_APPROVAL -> APPROVED -> PUBLISHED,
+    applying the HITL alert (sound + Telegram push) before waiting. dry_run
+    auto-approves and uses a dry publisher for hermetic testing.
+    """
+    meta_cfg = config.get("meta", {})
+    telegram_cfg = config.get("telegram", {})
+    approval_cfg = config.get("approval", {})
+
+    if not db.transition(post_id, "AWAITING_APPROVAL"):
+        logger.error("Post %d could not enter AWAITING_APPROVAL", post_id)
+        return 1
+
+    gateway = TelegramGateway(
+        db=db,
+        bot_token=telegram_cfg.get("bot_token", ""),
+        allowed_chat_ids=telegram_cfg.get("allowed_chat_ids", []),
+        decision_timeout_seconds=telegram_cfg.get(
+            "decision_timeout_seconds", 1800
+        ),
+        sound_enabled=approval_cfg.get("sound", True),
+        sound_file=approval_cfg.get("sound_file", ""),
+        notify_telegram=approval_cfg.get("notify_telegram", True),
+        notify_chat_id=(
+            telegram_cfg.get("notify_chat_id")
+            or (approval_cfg.get("notify_chat_id") or None)
+        ),
+    )
+    if dry_run:
+        # auto_approve performs the AWAITING_APPROVAL -> APPROVED transition.
+        decision = gateway.auto_approve(post_id)
+    else:
+        decision = gateway.request_approval(post_id, media_path, caption)
+    logger.info("Approval decision: %s", decision)
+
+    if decision.get("action") == "retry":
+        logger.info("Regeneration requested; pipeline would re-run.")
+        db.transition(post_id, "AWAITING_APPROVAL")
+        return 0
+    if decision.get("action") == "discard":
+        logger.info("Post discarded by human.")
+        db.transition(post_id, "REJECTED")
+        return 0
+    if decision.get("action") == "timeout":
+        logger.warning("Approval timed out; leaving post pending.")
+        return 0
+
+    if not dry_run and not db.transition(post_id, "APPROVED"):
+        logger.error("Post %d could not enter APPROVED", post_id)
+        return 1
+
+    publisher = MetaPublisher(
+        access_token=meta_cfg.get("access_token", ""),
+        instagram_user_id=meta_cfg.get("instagram_user_id", ""),
+        api_version=meta_cfg.get("api_version", "v21.0"),
+        graph_base_url=meta_cfg.get(
+            "graph_base_url", "https://graph.facebook.com"
+        ),
+        dry_run=meta_cfg.get("dry_run", True),
+    )
+
+    if publisher.dry_run:
+        logger.info(
+            "Meta publisher in DRY-RUN mode; skipping live container creation."
+        )
+        container_id = f"container_dry_{post_id}"
+        media_id = f"media_dry_{post_id}"
+    else:
+        vault_cfg = config.get("vault", {})
+        host = build_media_host(vault_cfg)
+        public_url = None
+        if host.is_configured():
+            public_url = host.upload(media_path)
+            logger.info("Media hosted at %s", public_url)
+        container_id = publisher.create_media_container(
+            media_path, caption, image_url=public_url
+        )
+        db.set_publishing_result(post_id, ig_container_id=container_id)
+        logger.info("Container created: %s", container_id)
+
+        media_id = publisher.publish_container(container_id)
+        db.set_publishing_result(post_id, ig_media_id=media_id)
+        logger.info("Published media id: %s", media_id)
+
+    if not db.transition(post_id, "PUBLISHED"):
+        logger.error("Post %d could not enter PUBLISHED", post_id)
+        return 1
+    logger.info("Pipeline complete for post %d", post_id)
+    return 0
+
+
 def run_pipeline(
     config: dict,
     account_key: str,
@@ -144,10 +263,8 @@ def run_pipeline(
     pipeline_cfg = config.get("pipeline", {})
     ollama_cfg = config.get("ollama", {})
     meta_cfg = config.get("meta", {})
-    telegram_cfg = config.get("telegram", {})
     persona_cfg = config.get("personas", {})
     vault_cfg = config.get("vault", {})
-    approval_cfg = config.get("approval", {})
 
     if dry_run:
         meta_cfg["dry_run"] = True
@@ -187,13 +304,24 @@ def run_pipeline(
                 db, vault_cfg, vault_media_id, dry_run=dry_run
             )
 
-        analyzer = VisualAnalyzer(
-            base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
-            model=ollama_cfg.get("vision_model", "qwen2-vl"),
-            timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
-        )
-        logger.info("Analyzing %s with %s ...", canonical_path, analyzer.model)
-        description = analyzer.analyze(str(canonical_path))
+        description = None
+        if media_vault is not None:
+            description = db.get_latest_vision_for_vault(vault_media_id)
+        if description:
+            logger.info(
+                "Reusing stored vision analysis for vault asset #%d",
+                vault_media_id,
+            )
+        else:
+            analyzer = VisualAnalyzer(
+                base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
+                model=ollama_cfg.get("vision_model", "qwen2-vl"),
+                timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
+            )
+            logger.info(
+                "Analyzing %s with %s ...", canonical_path, analyzer.model
+            )
+            description = analyzer.analyze(str(canonical_path))
         db.update_content(post_id, vision_description=description)
 
         personas = PersonaStore(
@@ -216,90 +344,11 @@ def run_pipeline(
             hashtags=",".join(generated["hashtags"]),
         )
 
-        if not db.transition(post_id, "AWAITING_APPROVAL"):
-            logger.error("Post %d could not enter AWAITING_APPROVAL", post_id)
-            return 1
-
-        caption = generated["caption"]
-        if generated["hashtags"]:
-            caption = caption + "\n\n" + " ".join(
-                f"#{h}" for h in generated["hashtags"]
-            )
-
-        gateway = TelegramGateway(
-            db=db,
-            bot_token=telegram_cfg.get("bot_token", ""),
-            allowed_chat_ids=telegram_cfg.get("allowed_chat_ids", []),
-            decision_timeout_seconds=telegram_cfg.get(
-                "decision_timeout_seconds", 1800
-            ),
-            sound_enabled=approval_cfg.get("sound", True),
-            sound_file=approval_cfg.get("sound_file", ""),
-            notify_telegram=approval_cfg.get("notify_telegram", True),
-            notify_chat_id=(
-                telegram_cfg.get("notify_chat_id")
-                or (approval_cfg.get("notify_chat_id") or None)
-            ),
+        caption = _caption_from_draft(generated)
+        return _approve_and_publish(
+            db, config, post_id, str(canonical_path), caption,
+            dry_run=dry_run,
         )
-        decision = gateway.request_approval(post_id, str(canonical_path), caption)
-        logger.info("Approval decision: %s", decision)
-
-        if decision.get("action") == "retry":
-            logger.info("Regeneration requested; pipeline would re-run.")
-            db.transition(post_id, "AWAITING_APPROVAL")
-            return 0
-        if decision.get("action") == "discard":
-            logger.info("Post discarded by human.")
-            db.transition(post_id, "REJECTED")
-            return 0
-        if decision.get("action") == "timeout":
-            logger.warning("Approval timed out; leaving post pending.")
-            return 0
-
-        # defer to config/arg dry_run handling
-        if not db.transition(post_id, "APPROVED"):
-            logger.error("Post %d could not enter APPROVED", post_id)
-            return 1
-
-        publisher = MetaPublisher(
-            access_token=meta_cfg.get("access_token", ""),
-            instagram_user_id=meta_cfg.get("instagram_user_id", ""),
-            api_version=meta_cfg.get("api_version", "v21.0"),
-            graph_base_url=meta_cfg.get("graph_base_url", "https://graph.facebook.com"),
-            dry_run=meta_cfg.get("dry_run", True),
-        )
-
-        effective_caption = caption  # already includes hashtags
-
-        if publisher.dry_run:
-            logger.info(
-                "Meta publisher in DRY-RUN mode; skipping live container creation."
-            )
-            container_id = f"container_dry_{post_id}"
-            media_id = f"media_dry_{post_id}"
-        else:
-            host = build_media_host(vault_cfg)
-            public_url = None
-            if host.is_configured():
-                public_url = host.upload(canonical_path)
-                logger.info("Media hosted at %s", public_url)
-                if media_vault is not None:
-                    db.set_public_url(vault_media_id, public_url)
-            container_id = publisher.create_media_container(
-                canonical_path, effective_caption, image_url=public_url
-            )
-            db.set_publishing_result(post_id, ig_container_id=container_id)
-            logger.info("Container created: %s", container_id)
-
-            media_id = publisher.publish_container(container_id)
-            db.set_publishing_result(post_id, ig_media_id=media_id)
-            logger.info("Published media id: %s", media_id)
-
-        if not db.transition(post_id, "PUBLISHED"):
-            logger.error("Post %d could not enter PUBLISHED", post_id)
-            return 1
-        logger.info("Pipeline complete for post %d", post_id)
-        return 0
 
     except OllamaUnavailableError as exc:
         logger.error("Ollama unavailable: %s", exc)
@@ -313,6 +362,110 @@ def run_pipeline(
             db.transition(post_id, "FAILED")
         except Exception as cleanup_exc:  # noqa: BLE001
             logger.warning("Failed to record pipeline failure: %s", cleanup_exc)
+        return 1
+    finally:
+        db.close()
+
+
+def run_retry(config: dict, post_id: int, *, dry_run: bool = True) -> int:
+    """Resume a FAILED post without redoing completed work (FR-010/SC-006).
+
+    Reuses the post row and its vault asset: vision analysis and the stored
+    draft are kept when present, so only the missing stages run again.
+    """
+    pipeline_cfg = config.get("pipeline", {})
+    ollama_cfg = config.get("ollama", {})
+    persona_cfg = config.get("personas", {})
+
+    db = DBManager(pipeline_cfg.get("db_path", "data/pipeline.db"))
+    try:
+        post = db.get_post(post_id)
+        if post is None:
+            logger.error("Post %d not found", post_id)
+            return 2
+        if post["status"] != "FAILED":
+            logger.error(
+                "Post %d is %s; only FAILED posts can be retried",
+                post_id,
+                post["status"],
+            )
+            return 2
+        if not db.transition(post_id, "PENDING_ANALYSIS"):
+            logger.error(
+                "Post %d could not resume from %s", post_id, post["status"]
+            )
+            return 1
+
+        media_path = post["media_path"]
+        if not media_path or not Path(media_path).exists():
+            logger.error("Media for post %d missing: %s", post_id, media_path)
+            return 2
+
+        if dry_run:
+            description = post.get("vision_description") or (
+                f"[DRY-RUN] Mocked vision for post {post_id}"
+            )
+        elif post.get("vision_description"):
+            description = post["vision_description"]
+        else:
+            analyzer = VisualAnalyzer(
+                base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
+                model=ollama_cfg.get("vision_model", "qwen2-vl"),
+                timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
+            )
+            logger.info(
+                "Analyzing %s with %s ...", media_path, analyzer.model
+            )
+            description = analyzer.analyze(media_path)
+            db.update_content(post_id, vision_description=description)
+
+        if post.get("caption"):
+            caption = _caption_from_post(post)
+        elif dry_run:
+            caption = f"Mocked retry caption for post {post_id}"
+            db.update_content(
+                post_id, reel_text="Mocked reel hook", caption=caption
+            )
+        else:
+            personas = PersonaStore(
+                persona_cfg.get("config_path", "config/personas.json")
+            )
+            persona = personas.get(post["account_key"])
+            generator = PromptGenerator(
+                base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
+                model=ollama_cfg.get("text_model", "qwen2.5"),
+                timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
+            )
+            logger.info(
+                "Generating content for persona '%s' ...", persona["name"]
+            )
+            generated = generator.generate(persona, description)
+            db.update_content(
+                post_id,
+                persona_name=persona["name"],
+                reel_text=generated["reel_text"],
+                caption=generated["caption"],
+                hashtags=",".join(generated["hashtags"]),
+            )
+            caption = _caption_from_draft(generated)
+
+        return _approve_and_publish(
+            db, config, post_id, media_path, caption, dry_run=dry_run
+        )
+    except OllamaUnavailableError as exc:
+        logger.error("Ollama unavailable: %s", exc)
+        db.set_publishing_result(post_id, meta_error=str(exc))
+        db.transition(post_id, "FAILED")
+        return 1
+    except Exception as exc:
+        logger.exception("Retry failed")
+        try:
+            db.set_publishing_result(post_id, meta_error=str(exc))
+            db.transition(post_id, "FAILED")
+        except Exception as cleanup_exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to record retry failure: %s", cleanup_exc
+            )
         return 1
     finally:
         db.close()
@@ -360,6 +513,17 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Override the vault bot token used by --resolve-chat",
     )
+    parser.add_argument(
+        "--retry",
+        action="store_true",
+        help="Resume a FAILED post (--post-id) without repeating completed work",
+    )
+    parser.add_argument(
+        "--post-id",
+        type=int,
+        default=None,
+        help="Post id required by --retry",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -368,6 +532,11 @@ def main(argv: list[str] | None = None) -> int:
         return run_vault_sync(cfg)
     if args.resolve_chat:
         return run_resolve_chat(cfg, bot_token=args.vault_bot_token)
+    if args.retry:
+        if not args.post_id:
+            parser.error("--retry requires --post-id")
+            return 2
+        return run_retry(cfg, args.post_id, dry_run=args.dry_run)
 
     if not args.account or not args.media:
         parser.error("--account and --media are required for a pipeline run")

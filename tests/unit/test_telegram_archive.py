@@ -162,6 +162,101 @@ def test_sync_is_idempotent_after_offset(monkeypatch, db, vault, tmp_path):
     assert calls == [12]
 
 
+def test_sync_halts_offset_before_failed_item(monkeypatch, db, vault, tmp_path):
+    good_post = {
+        "message_id": 1,
+        "chat": {"id": "-100"},
+        "photo": [{"file_id": "GOOD"}],
+    }
+    bad_post = {
+        "message_id": 2,
+        "chat": {"id": "-100"},
+        "photo": [{"file_id": "BAD"}],
+    }
+    later_post = {
+        "message_id": 3,
+        "chat": {"id": "-100"},
+        "video": {"file_id": "LATER"},
+    }
+    updates = [
+        {"update_id": 20, "channel_post": good_post},
+        {"update_id": 21, "channel_post": bad_post},
+        {"update_id": 22, "channel_post": later_post},
+    ]
+
+    def fake_get(url, params=None, timeout=120):
+        return FakeResponse(payload={"ok": True, "result": updates})
+
+    def fake_download(self, file_id, dest):
+        if file_id == "BAD":
+            raise VaultArchiveError("boom")
+        good = dest.with_suffix(".jpg")
+        good.write_bytes(b"bytes")
+        return good
+
+    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr(TelegramVault, "download_to", fake_download)
+
+    tv = TelegramVault(db, "TOKEN", "-100")
+    result = tv.sync_from_channel(vault)
+    # Only the good item is ingested; offset pauses before the failed one.
+    assert result["new"] == 1
+    assert result["offset"] == 20
+    assert db.get_channel_offset() == 20
+    with db._lock:
+        rows = db._conn.execute("SELECT * FROM vault_media").fetchall()
+    assert len(rows) == 1
+
+    # Next sync retries from the failed update and then catches the later one.
+    def fixed_download(self, file_id, dest):
+        if file_id == "LATER":
+            good = dest.with_suffix(".mp4")
+            good.write_bytes(b"video bytes")
+        else:
+            good = dest.with_suffix(".jpg")
+            good.write_bytes(b"more")
+        return good
+
+    monkeypatch.setattr(TelegramVault, "download_to", fixed_download)
+    result2 = tv.sync_from_channel(vault)
+    # update 20 re-processes (dedup counts as processed), 21 recovers, 22 (video) is new
+    assert result2["new"] == 3
+    assert result2["offset"] == 22
+    assert db.get_channel_offset() == 22
+    with db._lock:
+        rows = db._conn.execute("SELECT * FROM vault_media").fetchall()
+    assert len(rows) == 3
+    assert {dict(r)["media_type"] for r in rows} == {"image", "video"}
+
+
+def test_sync_ingests_video_keyed_post(monkeypatch, db, vault, tmp_path):
+    video_post = {
+        "message_id": 1,
+        "chat": {"id": "-100"},
+        "video": {"file_id": "VID"},
+    }
+    updates = [{"update_id": 5, "channel_post": video_post}]
+
+    def fake_get(url, params=None, timeout=120):
+        return FakeResponse(payload={"ok": True, "result": updates})
+
+    def fake_download(self, file_id, dest):
+        good = dest.with_suffix(".mp4")
+        good.write_bytes(b"video bytes")
+        return good
+
+    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr(TelegramVault, "download_to", fake_download)
+    tv = TelegramVault(db, "TOKEN", "-100")
+    result = tv.sync_from_channel(vault)
+    assert result["new"] == 1
+    with db._lock:
+        row = db._conn.execute(
+            "SELECT * FROM vault_media WHERE source = 'telegram'"
+        ).fetchone()
+    assert dict(row)["media_type"] == "video"
+
+
 def test_download_to_fetches_file(monkeypatch, tmp_path):
     class FakePayload:
         def __init__(self):

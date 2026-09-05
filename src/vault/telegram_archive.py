@@ -131,26 +131,39 @@ class TelegramVault:
 
         updates = resp.json().get("result", [])
         new_count = 0
-        max_offset = offset
+        completable = True
+        last_ok = offset
         for update in updates:
-            max_offset = max(max_offset, update.get("update_id", 0))
+            update_id = update.get("update_id", 0)
+            if not completable:
+                break
             post = update.get("channel_post")
             if not post:
+                last_ok = max(last_ok, update_id)
                 continue
             if not self._is_our_channel(post):
+                last_ok = max(last_ok, update_id)
                 continue
             file_id = self._media_file_id(post)
             if not file_id:
                 logger.debug("Skipping channel post without media: %s", post)
+                last_ok = max(last_ok, update_id)
                 continue
             try:
-                new_count += self._ingest_file_id(vault, file_id)
+                if self._ingest_file_id(vault, file_id):
+                    new_count += 1
+                last_ok = max(last_ok, update_id)
             except Exception as exc:  # noqa: BLE001 - one bad post not fatal
-                logger.warning("Failed to ingest channel media: %s", exc)
+                logger.warning(
+                    "Failed to ingest channel media: %s; will retry on the "
+                    "next sync",
+                    exc,
+                )
+                completable = False
 
-        if max_offset > offset:
-            self.db.set_channel_offset(max_offset)
-        return {"new": new_count, "offset": max_offset}
+        if last_ok > offset:
+            self.db.set_channel_offset(last_ok)
+        return {"new": new_count, "offset": last_ok}
 
     def _is_our_channel(self, post: dict) -> bool:
         chat = post.get("chat") or {}
@@ -160,6 +173,8 @@ class TelegramVault:
     def _media_file_id(post: dict) -> str | None:
         if post.get("document"):
             return post["document"].get("file_id")
+        if post.get("video"):
+            return post["video"].get("file_id")
         photos = post.get("photo")
         if photos:
             return max(photos, key=lambda s: s.get("file_size") or 0).get(

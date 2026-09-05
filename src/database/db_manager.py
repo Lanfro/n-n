@@ -326,6 +326,27 @@ class DBManager:
     # Channel sync cursor (single row, idempotent)
     # ------------------------------------------------------------------
 
+    def get_latest_vision_for_vault(self, vault_media_id: int) -> str | None:
+        """Most recent stored vision description for a vault asset.
+
+        Duplicate media (same sha256) backs the same `vault_media_id`, so a
+        later post of the same picture reuses this analysis instead of running
+        the vision model again (US4/AC2, data-model.md invariant).
+        """
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT vision_description FROM posts
+                 WHERE vault_media_id = ?
+                   AND vision_description IS NOT NULL
+                   AND vision_description != ''
+                 ORDER BY updated_at DESC, id DESC
+                 LIMIT 1
+                """,
+                (vault_media_id,),
+            ).fetchone()
+            return row[0] if row else None
+
     def get_channel_offset(self) -> int:
         with self._lock:
             row = self._conn.execute(

@@ -82,6 +82,29 @@ def test_channel_offset_roundtrip(db):
     assert db.get_channel_offset() == 77
 
 
+def test_latest_vision_reuse_per_vault_asset(db):
+    vid = _insert_media(db)
+    post_a = db.create_post("cat_1", "data/input_media/a.jpg")
+    post_b = db.create_post("cat_1", "data/input_media/b.jpg")
+    db.set_post_vault_media(post_a, vid)
+    db.set_post_vault_media(post_b, vid)
+    assert db.get_latest_vision_for_vault(vid) is None
+
+    db.update_content(post_a, vision_description="old description")
+    db.update_content(post_b, vision_description="new description")
+    assert db.get_latest_vision_for_vault(vid) == "new description"
+
+    db.update_content(post_a, vision_description="newest description")
+    assert db.get_latest_vision_for_vault(vid) == "newest description"
+
+
+def test_latest_vision_ignores_empty_and_unlinked(db):
+    vid = _insert_media(db)
+    post_id = db.create_post("cat_1", "a.jpg")
+    db.update_content(post_id, vision_description="")
+    assert db.get_latest_vision_for_vault(vid) is None
+
+
 def test_existing_posts_table_is_migrated(tmp_path):
     db_file = tmp_path / "legacy.db"
     conn = sqlite3.connect(str(db_file))
