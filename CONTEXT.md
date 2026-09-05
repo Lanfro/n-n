@@ -11,7 +11,7 @@
 ## 2. Technical Stack & Infrastructure
 * **Language**: Python 3.11+
 * **Agent Framework**: Opencode / Local Ollama instance
-* **Vision Model**: `qwen2-vl` (or `llava`) running locally via Ollama (`http://localhost:11434`)
+* **Vision Model**: `qwen3-vl:8b` (or `llava`) running locally via Ollama (`http://localhost:11434`)
 * **Text LLM**: `qwen2.5` or `llama3.1` running locally via Ollama
 * **External Integrations**:
   * **Meta Graph API (Instagram Creator API)**: For scheduling and publishing posts/Reels.

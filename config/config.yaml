@@ -5,7 +5,7 @@
 # Local Ollama instance
 ollama:
   base_url: "http://localhost:11434"
-  vision_model: "qwen2-vl"
+  vision_model: "qwen3-vl:8b"
   text_model: "qwen2.5"
   stream: false
   timeout_seconds: 120

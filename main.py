@@ -315,7 +315,7 @@ def run_pipeline(
         else:
             analyzer = VisualAnalyzer(
                 base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
-                model=ollama_cfg.get("vision_model", "qwen2-vl"),
+                model=ollama_cfg.get("vision_model", "qwen3-vl:8b"),
                 timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
             )
             logger.info(
@@ -410,7 +410,7 @@ def run_retry(config: dict, post_id: int, *, dry_run: bool = True) -> int:
         else:
             analyzer = VisualAnalyzer(
                 base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
-                model=ollama_cfg.get("vision_model", "qwen2-vl"),
+                model=ollama_cfg.get("vision_model", "qwen3-vl:8b"),
                 timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
             )
             logger.info(

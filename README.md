@@ -40,7 +40,7 @@ uv run pytest
 
 Copy `config/config.yaml` to `config/config.local.yaml` and fill in:
 
-- `ollama.base_url` + models (run `ollama serve` and `ollama pull qwen2-vl`)
+- `ollama.base_url` + models (run `ollama serve` and `ollama pull qwen3-vl:8b qwen2.5`)
 - `meta.access_token` / `meta.instagram_user_id` (Creator API)
 - `telegram.bot_token` / `telegram.allowed_chat_ids` (+ `notify_chat_id`)
 - `vault.telegram.bot_token` / `vault.telegram.chat_id` (dedicated vault bot)
