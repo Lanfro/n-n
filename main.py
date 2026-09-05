@@ -24,9 +24,13 @@ from src.vault.media_host import build_media_host
 from src.vault.media_vault import MediaNotSupportedError, MediaVault
 from src.vault.telegram_archive import TelegramVault, VaultArchiveError
 from src.vision.visual_analyzer import (
-    DEFAULT_PROMPT,
     OllamaUnavailableError,
     VisualAnalyzer,
+)
+
+DESCRIBE_PROMPT = (
+    "Describe the scene in this photo in at most three concise sentences: "
+    "the subjects, their expression and pose, and the setting."
 )
 
 logging.basicConfig(
@@ -178,7 +182,7 @@ def run_describe_vault(config: dict) -> int:
             base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
             model=model,
             timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
-            num_predict=ollama_cfg.get("num_predict", 200),
+            num_predict=ollama_cfg.get("num_predict", 512),
         )
         logger.info(
             "Describing %d image asset(s) with %s (sequential)",
@@ -195,7 +199,7 @@ def run_describe_vault(config: dict) -> int:
                 rows.append((asset, None, "file missing"))
                 continue
             try:
-                description = analyzer.analyze(path, DEFAULT_PROMPT)
+                description = analyzer.analyze(path, DESCRIBE_PROMPT)
             except OllamaUnavailableError as exc:
                 logger.error("Ollama unavailable; stopping batch: %s", exc)
                 break
@@ -211,7 +215,7 @@ def run_describe_vault(config: dict) -> int:
             db.upsert_vault_analysis(
                 vault_media_id=asset["id"],
                 model=model,
-                prompt=DEFAULT_PROMPT,
+                prompt=DESCRIBE_PROMPT,
                 description=description,
             )
             rows.append((asset, description, None))
