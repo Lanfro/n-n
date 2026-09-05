@@ -1,0 +1,43 @@
+# Cat Agent Instagram - Configuration
+# Copy to config/config.local.yaml (or set env vars) and fill in real credentials.
+# Never commit real tokens to the repository.
+
+# Local Ollama instance
+ollama:
+  base_url: "http://localhost:11434"
+  vision_model: "qwen2-vl"
+  text_model: "qwen2.5"
+  stream: false
+  timeout_seconds: 120
+
+# Persona configuration
+personas:
+  config_path: "config/personas.json"
+
+# Meta Graph API (Instagram Creator API)
+meta:
+  # Graph API version, e.g. v21.0
+  api_version: "v21.0"
+  graph_base_url: "https://graph.facebook.com"
+  # Access token for the connected Facebook Page / Instagram business account
+  access_token: ""
+  # Instagram business/user ID of the target account
+  instagram_user_id: ""
+  # Set true to prevent real publishing (safe default)
+  dry_run: true
+
+# Telegram approval gateway
+telegram:
+  bot_token: ""
+  # Comma-separated numeric chat IDs allowed to approve/reject
+  allowed_chat_ids: []
+  # Poll interval (seconds) used to wait for human decisions
+  poll_interval: 5
+  decision_timeout_seconds: 1800
+
+# Pipeline behaviour
+pipeline:
+  input_dir: "data/input_media"
+  db_path: "data/pipeline.db"
+  # Require explicit human approval before publishing
+  require_approval: true
