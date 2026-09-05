@@ -33,11 +33,11 @@ deltas (HITL alert FR-016, hosted publish URL FR-017).
 
 **Purpose**: Dependencies + configuration for the vault and alerting.
 
-- [ ] T001 Add `boto3` runtime dependency to `pyproject.toml` and run `uv lock`
-- [ ] T002 Add `vault:` and `approval:` blocks to `config/config.yaml`
+- [X] T001 Add `boto3` runtime dependency to `pyproject.toml` and run `uv lock`
+- [X] T002 Add `vault:` and `approval:` blocks to `config/config.yaml`
       (defaults; secrets blank; `vault.telegram.required: false`,
       `vault.host.backend: none`) per plan.md / contracts/media-host.md
-- [ ] T003 Add `data/vault/` (and any uploaded media caches) to `.gitignore`
+- [X] T003 Add `data/vault/` (and any uploaded media caches) to `.gitignore`
 
 ---
 

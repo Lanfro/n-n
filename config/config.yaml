@@ -31,9 +31,40 @@ telegram:
   bot_token: ""
   # Comma-separated numeric chat IDs allowed to approve/reject
   allowed_chat_ids: []
+  # Optional: chat to receive "action needed" push notifications (defaults to
+  # the first allowed_chat_ids)
+  notify_chat_id: ""
   # Poll interval (seconds) used to wait for human decisions
   poll_interval: 5
   decision_timeout_seconds: 1800
+
+# Human-in-the-loop alerting: sound + Telegram push when a decision is needed
+approval:
+  # Play a sound before blocking for a decision (false = silent / unattended)
+  sound: true
+  # Optional custom .wav file path; empty = system alert beep
+  sound_file: ""
+  # Send a Telegram "action needed" message before blocking
+  notify_telegram: true
+
+# Cat pictures media vault (archive + training corpus) and publish-time hosting
+vault:
+  # Local content-addressed archive mirror
+  root: "data/vault"
+  telegram:
+    # Dedicated bot (separate token from telegram.bot_token) + private channel
+    bot_token: ""
+    chat_id: ""
+    # Fail the pipeline when an archive upload fails (true) vs best-effort
+    required: false
+  host:
+    # Publish-time public URLs for Meta: none | r2 | s3
+    backend: "none"
+    bucket: ""
+    public_base_url: ""
+    endpoint_url: ""
+    access_key_id: ""
+    secret_access_key: ""
 
 # Pipeline behaviour
 pipeline:
