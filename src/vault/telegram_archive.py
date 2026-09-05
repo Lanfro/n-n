@@ -27,6 +27,14 @@ class VaultArchiveError(RuntimeError):
     pass
 
 
+class VaultSkipError(VaultArchiveError):
+    """A channel item that can never be ingested (e.g. >20MB bot cap).
+
+    Unlike a transient failure (retried on the next sync), a skip is permanent
+    and the offset moves past it so the rest of the queue is not blocked.
+    """
+
+
 class TelegramVault:
     def __init__(self, db: DBManager, bot_token: str, chat_id: str | int):
         if not bot_token or not chat_id:
@@ -153,6 +161,12 @@ class TelegramVault:
                 if self._ingest_file_id(vault, file_id):
                     new_count += 1
                 last_ok = max(last_ok, update_id)
+            except VaultSkipError as exc:
+                logger.warning(
+                    "Skipping permanently unretrievable channel media: %s",
+                    exc,
+                )
+                last_ok = max(last_ok, update_id)
             except Exception as exc:  # noqa: BLE001 - one bad post not fatal
                 logger.warning(
                     "Failed to ingest channel media: %s; will retry on the "
@@ -201,8 +215,14 @@ class TelegramVault:
         except requests.exceptions.RequestException as exc:
             raise VaultArchiveError(f"getFile failed: {exc}") from exc
         if not info.ok:
+            detail = info.text[:300]
+            if "file is too big" in detail:
+                raise VaultSkipError(
+                    "getFile rejected (permanent, >20MB bot download cap): "
+                    f"{info.status_code} {detail}"
+                )
             raise VaultArchiveError(
-                f"getFile rejected: {info.status_code} {info.text[:300]}"
+                f"getFile rejected: {info.status_code} {detail}"
             )
         file_path = info.json().get("result", {}).get("file_path")
         if not file_path:

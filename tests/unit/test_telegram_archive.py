@@ -4,7 +4,11 @@ import pytest
 
 from src.database.db_manager import DBManager
 from src.vault.media_vault import MediaVault
-from src.vault.telegram_archive import TelegramVault, VaultArchiveError
+from src.vault.telegram_archive import (
+    TelegramVault,
+    VaultArchiveError,
+    VaultSkipError,
+)
 
 OK_RESPONSE = {"ok": True, "result": {}}
 
@@ -227,6 +231,42 @@ def test_sync_halts_offset_before_failed_item(monkeypatch, db, vault, tmp_path):
         rows = db._conn.execute("SELECT * FROM vault_media").fetchall()
     assert len(rows) == 3
     assert {dict(r)["media_type"] for r in rows} == {"image", "video"}
+
+
+def test_sync_skips_permanent_oversized_file(monkeypatch, db, vault, tmp_path):
+    huge_post = {
+        "message_id": 1,
+        "chat": {"id": "-100"},
+        "video": {"file_id": "HUGE"},
+    }
+    later_post = {
+        "message_id": 2,
+        "chat": {"id": "-100"},
+        "photo": [{"file_id": "OK"}],
+    }
+    updates = [
+        {"update_id": 30, "channel_post": huge_post},
+        {"update_id": 31, "channel_post": later_post},
+    ]
+
+    def fake_get(url, params=None, timeout=120):
+        return FakeResponse(payload={"ok": True, "result": updates})
+
+    def fake_download(self, file_id, dest):
+        if file_id == "HUGE":
+            raise VaultSkipError("file is too big (permanent)")
+        good = dest.with_suffix(".jpg")
+        good.write_bytes(b"channel cat")
+        return good
+
+    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr(TelegramVault, "download_to", fake_download)
+    tv = TelegramVault(db, "TOKEN", "-100")
+    result = tv.sync_from_channel(vault)
+    # Offset advances past the permanently unretrievable item and keeps going.
+    assert result["new"] == 1
+    assert result["offset"] == 31
+    assert db.get_channel_offset() == 31
 
 
 def test_sync_ingests_video_keyed_post(monkeypatch, db, vault, tmp_path):
