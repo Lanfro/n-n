@@ -55,8 +55,14 @@ class MetaPublisher:
         self,
         image_path: str | Path,
         caption: str,
+        *,
+        image_url: str | None = None,
     ) -> str:
         """Create (and, in non-dry-run, actually create) the media container.
+
+        `image_url` is the publicly fetchable URL supplied by the vault's
+        MediaHost; when None (no host configured) a `file://` placeholder is
+        used so a live publish fails loudly instead of emitting a broken image.
 
         Returns the container id.
         """
@@ -72,7 +78,7 @@ class MetaPublisher:
                 "or instagram_user_id. Set config/meta.* or enable dry_run."
             )
 
-        image_url = self._image_url(image_path)
+        image_url = image_url or self._image_url(image_path)
         params = {
             "image_url": image_url,
             "caption": caption,

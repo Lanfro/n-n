@@ -23,6 +23,8 @@ from telegram.ext import (
 )
 
 from ..database.db_manager import DBManager
+from .notifier import notify
+from .sound import alert
 
 logger = logging.getLogger(__name__)
 
@@ -90,16 +92,38 @@ class TelegramGateway:
         bot_token: str = "",
         allowed_chat_ids: list[int] | None = None,
         decision_timeout_seconds: int = 1800,
+        sound_enabled: bool = True,
+        sound_file: str = "",
+        notify_telegram: bool = True,
+        notify_chat_id: str | int | None = None,
     ):
         self.db = db
         self.bot_token = bot_token
         self.allowed_chat_ids = set(allowed_chat_ids or [])
         self.timeout = decision_timeout_seconds
+        self.sound_enabled = sound_enabled
+        self.sound_file = sound_file
+        self.notify_telegram = notify_telegram
+        self.notify_chat_id = notify_chat_id
         self._fallback_reason: str | None = None
 
     @property
     def available(self) -> bool:
         return bool(self.bot_token)
+
+    def _alert_operator(self, post_id: int) -> None:
+        """Sound + Telegram push before blocking on a human decision."""
+        alert(self.sound_enabled, self.sound_file)
+        chat = self.notify_chat_id
+        if chat in ("", None) and self.allowed_chat_ids:
+            chat = next(iter(self.allowed_chat_ids))
+        if chat not in ("", None):
+            notify(
+                self.bot_token,
+                chat,
+                f"Action needed: post #{post_id} is awaiting your approval.",
+                enabled=self.notify_telegram,
+            )
 
     def auto_approve(self, post_id: int) -> dict:
         """Approve a post without interactive input (for dry-run/testing)."""
@@ -170,6 +194,7 @@ class TelegramGateway:
 
         Returns {'action': 'approve'|'retry'|'discard'|'timeout', ...}.
         """
+        self._alert_operator(post_id)
         if not self.available:
             self._fallback_reason = (
                 "Telegram bot_token not configured; using CLI approval."

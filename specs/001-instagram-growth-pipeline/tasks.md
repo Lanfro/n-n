@@ -75,27 +75,27 @@ publish); baseline publish loop already exists.
 
 ### Implementation for User Story 1
 
-- [ ] T009 [P] [US1] Implement `src/approval/sound.py` — `alert()` plays
+- [X] T009 [P] [US1] Implement `src/approval/sound.py` — `alert()` plays
       `winsound` system beep, or a custom `.wav` via `PlaySound(SND_ASYNC)`;
       graceful no-op when `approval.sound: false` or winsound unavailable
-- [ ] T010 [P] [US1] Implement `src/approval/notifier.py` — `notify()` sends a
+- [X] T010 [P] [US1] Implement `src/approval/notifier.py` — `notify()` sends a
       Telegram text message via the Bot API (`requests` POST `sendMessage`) to
       `telegram.notify_chat_id` or the first `allowed_chat_ids`; silent no-op
       when not configured or `approval.notify_telegram: false`
-- [ ] T011 [US1] Wire alert into `TelegramGateway.request_approval` in
+- [X] T011 [US1] Wire alert into `TelegramGateway.request_approval` in
       `src/approval/telegram_gateway.py` so sound + notification fire before
       CLI or Telegram waiting (FR-016)
-- [ ] T012 [P] [US1] Implement `src/vault/media_host.py` — `MediaHost` ABC +
+- [X] T012 [P] [US1] Implement `src/vault/media_host.py` — `MediaHost` ABC +
       `R2Host`/`S3Host` (boto3, `endpoint_url` override, `public_base_url`,
       key `media/<sha[:2]>/<sha[:12]>.ext`, raise `MediaHostConfigError` on
       half-config) + `NoHost` per contracts/media-host.md
-- [ ] T013 [US1] Rework `MetaPublisher._image_url` in
+- [X] T013 [US1] Rework `MetaPublisher._image_url` in
       `src/publisher/meta_publisher.py` to accept a resolved `public_url`
       (host upload) and keep the fail-loud `file://` placeholder only when
       None (FR-017)
-- [ ] T014 [US1] Connect host upload + `public_url` in `main.py` publish path
+- [X] T014 [US1] Connect host upload + `public_url` in `main.py` publish path
       (non-dry-run only; skip on `--dry-run`)
-- [ ] T015 [US1] Tests: HITL alert + URL resolution in
+- [X] T015 [US1] Tests: HITL alert + URL resolution in
       `tests/unit/test_alert.py` and `tests/unit/test_media_host.py`
       (mock winsound, requests, boto3)
 

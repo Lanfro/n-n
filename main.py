@@ -19,6 +19,7 @@ from src.approval.telegram_gateway import TelegramGateway
 from src.database.db_manager import DBManager
 from src.engine.prompt_generator import PersonaStore, PromptGenerator
 from src.publisher.meta_publisher import MetaPublisher
+from src.vault.media_host import build_media_host
 from src.vision.visual_analyzer import OllamaUnavailableError, VisualAnalyzer
 
 logging.basicConfig(
@@ -65,6 +66,8 @@ def run_pipeline(
     meta_cfg = config.get("meta", {})
     telegram_cfg = config.get("telegram", {})
     persona_cfg = config.get("personas", {})
+    vault_cfg = config.get("vault", {})
+    approval_cfg = config.get("approval", {})
 
     if dry_run:
         meta_cfg["dry_run"] = True
@@ -127,6 +130,13 @@ def run_pipeline(
             decision_timeout_seconds=telegram_cfg.get(
                 "decision_timeout_seconds", 1800
             ),
+            sound_enabled=approval_cfg.get("sound", True),
+            sound_file=approval_cfg.get("sound_file", ""),
+            notify_telegram=approval_cfg.get("notify_telegram", True),
+            notify_chat_id=(
+                telegram_cfg.get("notify_chat_id")
+                or (approval_cfg.get("notify_chat_id") or None)
+            ),
         )
         decision = gateway.request_approval(post_id, str(ml), caption)
         logger.info("Approval decision: %s", decision)
@@ -165,7 +175,14 @@ def run_pipeline(
             container_id = f"container_dry_{post_id}"
             media_id = f"media_dry_{post_id}"
         else:
-            container_id = publisher.create_media_container(ml, effective_caption)
+            host = build_media_host(vault_cfg)
+            public_url = None
+            if host.is_configured():
+                public_url = host.upload(ml)
+                logger.info("Media hosted at %s", public_url)
+            container_id = publisher.create_media_container(
+                ml, effective_caption, image_url=public_url
+            )
             db.set_publishing_result(post_id, ig_container_id=container_id)
             logger.info("Container created: %s", container_id)
 
