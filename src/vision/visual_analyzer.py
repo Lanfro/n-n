@@ -1,14 +1,19 @@
 """Local vision model integration (Ollama Qwen2-VL).
 
 Encodes images to base64 and sends them to the local Ollama REST API.
-Falls back to a clear, actionable error when Ollama is not running so the
-rest of the pipeline degrades gracefully instead of crashing.
+Large photos are downscaled client-side so the encoded image stays well
+under Ollama's default context window (phones can otherwise produce
+~4096+ image tokens and overflow it). Falls back to a clear, actionable
+error when Ollama is not running so the rest of the pipeline degrades
+gracefully instead of crashing.
 """
 
 import base64
+import io
 from pathlib import Path
 
 import requests
+from PIL import Image, ImageOps
 
 DEFAULT_PROMPT = (
     "Describe this cat's expression, posture, and surroundings in detail. "
@@ -22,16 +27,60 @@ class OllamaUnavailableError(RuntimeError):
 
 
 class VisualAnalyzer:
-    def __init__(self, base_url: str, model: str, timeout_seconds: int = 120):
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        timeout_seconds: int = 120,
+        max_side: int = 1280,
+    ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout_seconds
+        self.max_side = max_side
 
-    def _encode_image(self, image_path: str | Path) -> str:
+    def _prepare_image_bytes(self, image_path: str | Path) -> bytes:
+        """Return image bytes sized for the model context window.
+
+        Images whose longest side exceeds `max_side` are downscaled and
+        re-encoded; smaller images pass through byte-for-byte unchanged so
+        existing behaviour is preserved.
+        """
         path = Path(image_path)
         if not path.exists():
             raise FileNotFoundError(f"Image not found: {path}")
-        return base64.b64encode(path.read_bytes()).decode("utf-8")
+        data = path.read_bytes()
+        try:
+            with Image.open(io.BytesIO(data)) as img:
+                img = ImageOps.exif_transpose(img)
+                if max(img.size) <= self.max_side:
+                    return data
+                ratio = self.max_side / max(img.size)
+                img = img.resize(
+                    (round(img.width * ratio), round(img.height * ratio)),
+                    Image.LANCZOS,
+                )
+        except Exception:  # noqa: BLE001 - let Ollama try the raw file
+            return data
+
+        image = img
+        if image.mode in ("RGBA", "LA") or (
+            image.mode not in ("RGB", "L") and image.format == "PNG"
+        ):
+            image = image.convert("RGBA")
+            bg = Image.new("RGBA", image.size, (255, 255, 255, 255))
+            image = Image.alpha_composite(bg, image).convert("RGB")
+        elif image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=90)
+        return buf.getvalue()
+
+    def _encode_image(self, image_path: str | Path) -> str:
+        image_b64 = base64.b64encode(
+            self._prepare_image_bytes(image_path)
+        ).decode("utf-8")
+        return image_b64
 
     def analyze(self, image_path: str | Path, prompt: str = DEFAULT_PROMPT) -> str:
         """Return the vision model's description of the image."""

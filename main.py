@@ -198,6 +198,15 @@ def run_describe_vault(config: dict) -> int:
             except OllamaUnavailableError as exc:
                 logger.error("Ollama unavailable; stopping batch: %s", exc)
                 break
+            except Exception as exc:  # noqa: BLE001 - one bad image not fatal
+                logger.warning(
+                    "Failed to describe asset #%d (%s): %s",
+                    asset["id"],
+                    path.name,
+                    exc,
+                )
+                rows.append((asset, None, f"analysis failed: {exc}"))
+                continue
             db.upsert_vault_analysis(
                 vault_media_id=asset["id"],
                 model=model,
