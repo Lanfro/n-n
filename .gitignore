@@ -26,3 +26,8 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
+
+# Agent config & credentials (keep speckit workflow commands)
+.opencode/*
+!.opencode/commands/
+!.opencode/commands/
