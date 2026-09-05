@@ -39,8 +39,14 @@ class _FakeMessage:
 
 
 class _FakeBot:
+    def __init__(self) -> None:
+        self.sent_confirmations: list[tuple[int, str]] = []
+
     async def send_photo(self, **kwargs) -> _FakeMessage:
         return _FakeMessage()
+
+    async def send_message(self, chat_id: int, text: str, **_kwargs) -> None:
+        self.sent_confirmations.append((chat_id, text))
 
 
 class _FakeApplication:
@@ -139,3 +145,21 @@ def test_telegram_approval_starts_polling(monkeypatch) -> None:
         "drop_pending_updates": True,
     }
     assert app.updater.stopped is True
+
+
+def test_telegram_approval_confirms_decision(monkeypatch) -> None:
+    monkeypatch.setattr(gw, "Application", _FakeApplicationClass)
+    gw._pending[123] = {"action": "approve"}
+    gateway = gw.TelegramGateway(
+        db=None,  # type: ignore[arg-type]
+        bot_token="token",
+        allowed_chat_ids=[123],
+        decision_timeout_seconds=5,
+    )
+    decision = asyncio.run(
+        gateway._request_via_telegram(9, "media.jpg", "caption")
+    )
+    assert decision["action"] == "approve"
+    app = _FakeApplicationClass.last_built
+    assert app is not None
+    assert app.bot.sent_confirmations == [(123, "Approved. Proceeding to completion.")]

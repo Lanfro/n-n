@@ -32,6 +32,12 @@ APPROVE_ACTION = "approve"
 RETRY_ACTION = "retry"
 DISCARD_ACTION = "discard"
 
+_DECISION_CONFIRMATIONS = {
+    "approve": "Approved. Proceeding to completion.",
+    "retry": "Regeneration requested.",
+    "discard": "Post discarded.",
+}
+
 # In-memory cache: chat_id -> {post_id, sent_photo}
 _pending: dict[int, dict] = {}
 
@@ -189,6 +195,21 @@ class TelegramGateway:
                     decision = pending["action"]
                     break
                 await asyncio.sleep(2)
+
+            if decision:
+                try:
+                    await bot.send_message(
+                        chat_id=message.chat_id,
+                        text=_DECISION_CONFIRMATIONS.get(
+                            decision, f"Post #{post_id}: {decision}."
+                        ),
+                    )
+                except TelegramError:
+                    logger.warning(
+                        "Could not send decision confirmation for post %d",
+                        post_id,
+                        exc_info=True,
+                    )
 
             await application.updater.stop()
             await application.stop()
