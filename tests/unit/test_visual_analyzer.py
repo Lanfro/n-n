@@ -80,6 +80,69 @@ def test_missing_file_raises(tmp_path) -> None:
         analyzer._prepare_image_bytes(tmp_path / "nope.jpg")
 
 
+def test_analyze_sends_num_predict_option(tmp_path, monkeypatch) -> None:
+    import requests
+
+    path = _make_jpeg(tmp_path, 100, 100)
+    captured = {}
+
+    def fake_post(url, json=None, timeout=120):
+        captured["json"] = json
+        class R:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+            def json(self):
+                return {"response": "a cat"}
+        return R()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    analyzer = VisualAnalyzer(
+        base_url="http://localhost:11434",
+        model="qwen3-vl:8b",
+        timeout_seconds=10,
+        num_predict=200,
+    )
+    out = analyzer.analyze(path)
+    assert out == "a cat"
+    assert captured["json"]["options"] == {"num_predict": 200}
+
+
+def test_analyze_omits_options_without_num_predict(tmp_path, monkeypatch) -> None:
+    import requests
+
+    path = _make_jpeg(tmp_path, 100, 100)
+    captured = {}
+
+    def fake_post(url, json=None, timeout=120):
+        captured["json"] = json
+        class R:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+            def json(self):
+                return {"response": "ok"}
+
+        return R()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    analyzer = VisualAnalyzer(
+        base_url="http://localhost:11434",
+        model="qwen3-vl:8b",
+        timeout_seconds=10,
+    )
+    analyzer.analyze(path)
+    assert "options" not in captured["json"]
+
+
 # ---- Batch resilience test ----
 
 

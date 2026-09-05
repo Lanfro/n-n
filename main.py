@@ -178,6 +178,7 @@ def run_describe_vault(config: dict) -> int:
             base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
             model=model,
             timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
+            num_predict=ollama_cfg.get("num_predict", 200),
         )
         logger.info(
             "Describing %d image asset(s) with %s (sequential)",
