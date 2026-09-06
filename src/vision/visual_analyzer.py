@@ -34,12 +34,14 @@ class VisualAnalyzer:
         timeout_seconds: int = 120,
         max_side: int = 1280,
         num_predict: int | None = None,
+        keep_alive: str | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout_seconds
         self.max_side = max_side
         self.num_predict = num_predict
+        self.keep_alive = keep_alive
 
     def _prepare_image_bytes(self, image_path: str | Path) -> bytes:
         """Return image bytes sized for the model context window.
@@ -93,6 +95,8 @@ class VisualAnalyzer:
             "images": [image_b64],
             "stream": False,
         }
+        if self.keep_alive is not None:
+            payload["keep_alive"] = self.keep_alive
         if self.num_predict is not None:
             payload["options"] = {"num_predict": self.num_predict}
         url = f"{self.base_url}/api/generate"

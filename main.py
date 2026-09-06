@@ -186,6 +186,8 @@ def run_describe_vault(config: dict) -> int:
             model=model,
             timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
             num_predict=ollama_cfg.get("num_predict", 512),
+            max_side=ollama_cfg.get("max_side", 1280),
+            keep_alive=ollama_cfg.get("keep_alive", "30m"),
         )
         logger.info(
             "Describing %d image asset(s) with %s (sequential)",
