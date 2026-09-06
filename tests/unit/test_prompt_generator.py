@@ -278,3 +278,17 @@ def test_strip_inline_hashtags_mid_caption_untouched() -> None:
     assert gen._strip_inline_hashtags(text) == text
     assert gen._strip_inline_hashtags("") == ""
     assert gen._strip_inline_hashtags("  ") == ""
+
+
+def test_strip_inline_hashtags_with_trailing_comma() -> None:
+    gen = PromptGenerator("http://localhost:11434", "qwen2.5")
+    assert (
+        gen._strip_inline_hashtags(
+            "Dinner time in a half-empty bowl. Exotic Shorthair, #catdrama,"
+        )
+        == "Dinner time in a half-empty bowl. Exotic Shorthair"
+    )
+    assert (
+        gen._strip_inline_hashtags("So sleepy! #catdrama #relatablecats!!!")
+        == "So sleepy!"
+    )

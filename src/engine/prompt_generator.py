@@ -151,8 +151,10 @@ VISUAL CONTEXT:
         """
         if not caption:
             return caption
-        stripped = re.sub(r"(?:\s+#[0-9A-Za-z_]+)+\s*$", "", caption)
-        return stripped.rstrip()
+        stripped = re.sub(
+            r"(?:[,;:]*\s+#[0-9A-Za-z_]+[,.;!?]*)+$", "", caption
+        )
+        return stripped.rstrip(" ,;:").rstrip()
 
     @staticmethod
     def _normalize_hashtags(tags: list, persona: dict) -> list[str]:
