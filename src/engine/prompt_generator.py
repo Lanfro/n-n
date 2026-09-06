@@ -67,10 +67,17 @@ class PersonaStore:
 
 
 class PromptGenerator:
-    def __init__(self, base_url: str, model: str, timeout_seconds: int = 120):
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        timeout_seconds: int = 120,
+        keep_alive: str | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout_seconds
+        self.keep_alive = keep_alive
 
     def _assemble_prompt(self, persona: dict, vision_description: str) -> str:
         reel_rules = persona.get("reel_rules", {})
@@ -140,11 +147,13 @@ VISUAL CONTEXT:
             persona = {**persona, "system_prompt": system_override}
 
         prompt = self._assemble_prompt(persona, vision_description)
-        payload = {
+        payload: dict = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
         }
+        if self.keep_alive:
+            payload["keep_alive"] = self.keep_alive
         url = f"{self.base_url}/api/generate"
         try:
             resp = requests.post(url, json=payload, timeout=self.timeout)

@@ -642,6 +642,7 @@ def run_pipeline(
             base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
             model=ollama_cfg.get("text_model", "qwen2.5"),
             timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
+            keep_alive=ollama_cfg.get("keep_alive", "30m"),
         )
         logger.info("Generating content for persona '%s' ...", persona["name"])
         generated = generator.generate(persona, description)
@@ -744,6 +745,7 @@ def run_retry(config: dict, post_id: int, *, dry_run: bool = True) -> int:
                 base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
                 model=ollama_cfg.get("text_model", "qwen2.5"),
                 timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
+                keep_alive=ollama_cfg.get("keep_alive", "30m"),
             )
             logger.info(
                 "Generating content for persona '%s' ...", persona["name"]
