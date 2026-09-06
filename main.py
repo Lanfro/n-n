@@ -289,11 +289,14 @@ def run_drafts_vault(config: dict, account_key: str) -> int:
                 hashtags=",".join(draft.get("hashtags") or []),
             )
             rows.append((asset, draft, None))
-            print(
-                f"[{i}/{len(missing)}] asset #{asset['id']} "
-                f"({asset['original_filename']}): "
-                f"{draft['caption'][:140]}"
-            )
+            try:
+                print(
+                    f"[{i}/{len(missing)}] asset #{asset['id']} "
+                    f"({asset['original_filename']}): "
+                    f"{draft['caption'][:140]}"
+                )
+            except UnicodeEncodeError:  # non-ASCII caption on a cp1252 console
+                print(f"[{i}/{len(missing)}] asset #{asset['id']} drafted")
 
         _write_drafts_report(report_path, persona["name"], rows)
         logger.info("Wrote %d draft(s) to %s", len(rows), report_path)
@@ -410,10 +413,13 @@ def run_describe_vault(config: dict) -> int:
                 description=description,
             )
             rows.append((asset, description, None))
-            print(
-                f"[{i}/{len(missing)}] asset #{asset['id']} "
-                f"{path.name}: {description[:160]}"
-            )
+            try:
+                print(
+                    f"[{i}/{len(missing)}] asset #{asset['id']} "
+                    f"{path.name}: {description[:160]}"
+                )
+            except UnicodeEncodeError:  # non-ASCII text on a cp1252 console
+                print(f"[{i}/{len(missing)}] asset #{asset['id']} described")
 
         _write_descriptions_report(report_path, model, rows)
         logger.info(
