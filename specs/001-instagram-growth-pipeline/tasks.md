@@ -231,6 +231,24 @@ pick publishable content without running the full submit/approve loop per photo.
   `PromptGenerator._strip_inline_hashtags` removes a trailing `#tag` run so
   the publish path appends the JSON hashtags once. (T033-T038 + this note)
 
+### Notes 2 (2026-09-06, review pass)
+
+- Review of the 310-draft corpus found two issues: ~48% of cat_2 drafts
+  fixated on vacuums (the persona prompt mentions fearing appliances), and 2
+  reels contained schema remnants (e.g. a literal `<3-7 word on-screen hook>`)
+  that the caption-only empty-guard missed. Fixed both upstream:
+- `run_drafts_vault` now rotates a per-asset FORCED SUBJECT topic
+  (`persona.topics`, deterministic by asset id) that bans vacuum/housework
+  mentions → cat_2 vacuum mentions dropped 74 → 1 after re-roll.
+- `PromptGenerator.is_usable()` rejects empty or schema-remnant
+  reels/captions and `generate()` returns empty on violation, so the retry
+  path treats echoes as failures. The inline-hashtag stripper also now
+  catches trailing `#tag,` runs ending in punctuation.
+- cat_1 = 155/155 (unchanged), cat_2 re-rolled 155/155 (89 tests, ruff,
+  dry-run smoke all green). `data/ready_to_post.md` = curated publish-ready
+  shortlist: 154/155 per persona (asset #1 = cartoon-bear placeholder,
+  source `drop`, excluded), 7-9 WARN reels over 7 words.
+
 ---
 
 ## Dependencies & Execution Order
