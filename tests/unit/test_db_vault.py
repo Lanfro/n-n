@@ -58,8 +58,27 @@ def test_set_vault_archive(db):
 
 def test_set_public_url(db):
     vid = _insert_media(db)
-    db.set_public_url(vid, "https://vault.example.dev/media/ab/cd/ab.jpg")
+    db.set_public_url(vid, "https://cdn.example.com/cat.jpg")
     assert db.get_vault_media(vid)["public_url"].startswith("https://")
+
+
+def test_upsert_vault_subject(db):
+    vid = _insert_media(db, source="telegram")
+    assert db.get_vault_subject(vid) is None
+    db.upsert_vault_subject(vid, "nero", method="heuristic")
+    row = db.get_vault_subject(vid)
+    assert row["label"] == "nero"
+    assert row["method"] == "heuristic"
+    db.upsert_vault_subject(vid, "both", method="vision")  # conflict -> refresh
+    refreshed = db.get_vault_subject(vid)
+    assert refreshed["label"] == "both"
+    assert refreshed["method"] == "vision"
+
+
+def test_upsert_vault_subject_rejects_unknown_label(db):
+    vid = _insert_media(db)
+    with pytest.raises(ValueError):
+        db.upsert_vault_subject(vid, "garfield")
 
 
 def test_invalid_source_rejected(db):

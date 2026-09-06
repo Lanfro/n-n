@@ -104,10 +104,18 @@ CREATE TABLE IF NOT EXISTS vault_drafts (
     created_at TEXT NOT NULL,
     UNIQUE (vault_media_id, persona_name)
 );
+
+CREATE TABLE IF NOT EXISTS vault_subjects (
+    vault_media_id INTEGER PRIMARY KEY,
+    label TEXT NOT NULL,
+    method TEXT NOT NULL DEFAULT 'manual',
+    updated_at TEXT NOT NULL
+);
 """
 
 VAULT_SOURCES = {"drop", "ai_generated", "telegram"}
 VAULT_MEDIA_TYPES = {"image", "video"}
+SUBJECT_LABELS = {"nero", "nuvola", "both", "unclear"}
 
 
 def _utcnow() -> str:
@@ -385,6 +393,52 @@ class DBManager:
                  ORDER BY created_at DESC, id DESC LIMIT 1
                 """,
                 (vault_media_id, persona_name),
+            ).fetchone()
+            return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # Vault subjects (which cat(s) appear in a photo)
+    # ------------------------------------------------------------------
+
+    def upsert_vault_subject(
+        self,
+        vault_media_id: int,
+        label: str,
+        *,
+        method: str = "manual",
+    ) -> None:
+        """Store/refresh the subject label for a vault asset.
+
+        Label is one of `nero` (black cat with a visible tooth), `nuvola`
+        (gray-and-white cat with blue eyes, grumpy look), `both`, or
+        `unclear`. `method` records how it was derived (heuristic/vision/
+        manual) for provenance and re-labelling.
+        """
+        if label not in SUBJECT_LABELS:
+            raise ValueError(
+                f"Unknown subject label: {label}. "
+                f"Allowed: {', '.join(sorted(SUBJECT_LABELS))}"
+            )
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO vault_subjects (vault_media_id, label, method, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(vault_media_id) DO UPDATE SET
+                    label = excluded.label,
+                    method = excluded.method,
+                    updated_at = excluded.updated_at
+                """,
+                (vault_media_id, label, method, _utcnow()),
+            )
+            self._conn.commit()
+
+    def get_vault_subject(self, vault_media_id: int) -> dict | None:
+        """Stored subject label for a vault asset, if any."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM vault_subjects WHERE vault_media_id = ?",
+                (vault_media_id,),
             ).fetchone()
             return dict(row) if row else None
 

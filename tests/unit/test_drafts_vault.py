@@ -142,6 +142,71 @@ def test_run_drafts_vault(tmp_path, monkeypatch):
     assert len([l for l in report.splitlines() if l.startswith("## Asset")]) == 3
 
 
+def test_run_drafts_vault_respects_subject_labels(tmp_path, monkeypatch):
+    """Drafts only apply to photos whose subject label matches the persona."""
+    import main
+
+    db = DBManager(tmp_path / "pipeline.db")
+    vault = MediaVault(db, tmp_path / "vault")
+    _make_jpeg(tmp_path, 100, 100, "n.jpg", color="black")
+    _make_jpeg(tmp_path, 90, 100, "v.jpg", color="white")
+    _make_jpeg(tmp_path, 80, 100, "u.jpg", color="orange")
+    ids = {}
+    for name in ("n.jpg", "v.jpg", "u.jpg"):
+        ids[name] = vault.ingest(tmp_path / name, source="telegram")
+    for asset in db.list_vault_media("image"):
+        db.upsert_vault_analysis(
+            vault_media_id=asset["id"],
+            model="qwen3-vl:8b",
+            prompt="describe",
+            description=f"seen-{asset['original_filename']}",
+        )
+    db.upsert_vault_subject(ids["n.jpg"], "nero", method="heuristic")
+    db.upsert_vault_subject(ids["v.jpg"], "nuvola", method="heuristic")
+    db.upsert_vault_subject(ids["u.jpg"], "unclear", method="heuristic")
+    db.close()
+
+    config = {
+        "pipeline": {
+            "db_path": str(tmp_path / "pipeline.db"),
+            "drafts_report": str(tmp_path / "drafts.md"),
+        },
+        "personas": {"config_path": str(tmp_path / "personas.json")},
+        "ollama": {
+            "base_url": "http://localhost:11434",
+            "vision_model": "qwen3-vl:8b",
+            "text_model": "qwen2.5",
+            "timeout_seconds": 10,
+        },
+    }
+    (tmp_path / "personas.json").write_text(
+        '{"accounts": {"cat_1": ' + _dump(PERSONA) + "}}", encoding="utf-8"
+    )
+
+    seen = []
+
+    def generate(self, persona, description):
+        seen.append(description)
+        return {
+            "reel_text": "fluffy loaf",
+            "caption": f"Draft for {description}",
+            "hashtags": ["exoticshorthair", "catsofinstagram"],
+        }
+
+    monkeypatch.setattr(main.PromptGenerator, "generate", generate)
+    assert main.run_drafts_vault(config, "cat_1") == 0
+
+    db = DBManager(tmp_path / "pipeline.db")
+    rows = {
+        a["original_filename"]: db.get_vault_draft(a["id"], "cat_1")
+        for a in db.list_vault_media("image")
+    }
+    assert rows["n.jpg"] is not None  # nero photo -> Nero persona
+    assert rows["v.jpg"] is None  # nuvola-only photo skipped
+    assert rows["u.jpg"] is None  # unclear skipped
+    db.close()
+
+
 def test_run_drafts_vault_skips_undescribed(tmp_path, monkeypatch):
     """Assets without a stored description produce no draft."""
     import main

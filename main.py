@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import logging
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,6 +33,63 @@ DESCRIBE_PROMPT = (
     "Describe the scene in this photo in at most three concise sentences: "
     "the subjects, their expression and pose, and the setting."
 )
+
+IDENTIFY_PROMPT = (
+    "Identify the cat(s) in this photo. Is it (a) a solid black cat with a "
+    "small tooth sticking out of the corner of its mouth (Nero), (b) a "
+    "gray-and-white cat with blue eyes and an always-grumpy-looking face "
+    "(Nuvola), (c) both cats together, or (d) neither/unclear (a close-up, "
+    "an object, a non-cat, or the cats are indistinguishable)? Reply with "
+    "EXACTLY one word: nero, nuvola, both, or unclear."
+)
+
+# Which cat(s) may appear per account key (see --label-vault).
+ACCOUNT_SUBJECTS = {
+    "cat_1": {"nero", "both"},
+    "cat_2": {"nuvola", "both"},
+}
+
+_SUBJECT_NERO_RE = re.compile(
+    r"\bblack (cat|kitten)\b|\bsolid black\b",
+    re.IGNORECASE,
+)
+_SUBJECT_NUVOLA_RE = re.compile(
+    r"\b(?:gray|grey)[ -]?(?:and[ -]?white|white|tabby|fur)\b"
+    r"|\b(?:gray|grey) and white\b"
+    r"|\blight[- ]?(?:colou?red|gray|grey)\b(?: cat| kitten| tabby| fur)?"
+    r"|\bwhite and (?:gray|grey)\b"
+    r"|\bblue eyes?\b",
+    re.IGNORECASE,
+)
+
+
+def _classify_subject_heuristic(description: str | None) -> str:
+    """Heuristically map a stored description to nero/nuvola/both/unclear."""
+    d = description or ""
+    nero = bool(_SUBJECT_NERO_RE.search(d))
+    nuvola = bool(_SUBJECT_NUVOLA_RE.search(d))
+    if nero and nuvola:
+        return "both"
+    if nero:
+        return "nero"
+    if nuvola:
+        return "nuvola"
+    return "unclear"
+
+
+def _parse_vision_label(response: str) -> str | None:
+    """Pick the one-word subject label out of a vision answer."""
+    text = (response or "").lower()
+    words = {w for w in re.findall(r"\b(nero|nuvola|both|unclear)\b", text)}
+    if "nero" in words and "nuvola" in words:
+        return "both"
+    if "nero" in words:
+        return "nero"
+    if "nuvola" in words:
+        return "nuvola"
+    if "unclear" in words:
+        return "unclear"
+    return None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -210,6 +268,27 @@ def run_drafts_vault(config: dict, account_key: str) -> int:
             if db.get_vault_analysis(a["id"], vision_model) is not None
             and db.get_vault_draft(a["id"], persona["name"]) is None
         ]
+        allowed = ACCOUNT_SUBJECTS.get(account_key)
+
+        def subject_label(a: dict) -> str | None:
+            row = db.get_vault_subject(a["id"])
+            return row["label"] if row else None
+
+        if allowed:
+            def is_match(a: dict) -> bool:
+                s = subject_label(a)
+                return s is None or s in allowed  # unlabeled = legacy allow
+
+            mismatched = [a for a in missing if not is_match(a)]
+            missing = [a for a in missing if is_match(a)]
+            for a in mismatched:
+                logger.info(
+                    "Skipping asset #%d (%s): not a %s subject (%s)",
+                    a["id"],
+                    a["original_filename"],
+                    persona["name"],
+                    subject_label(a) or "unlabeled",
+                )
         if not missing:
             logger.info(
                 "No image assets without a %s draft remain "
@@ -432,6 +511,111 @@ def run_describe_vault(config: dict) -> int:
         _write_descriptions_report(report_path, model, rows)
         logger.info(
             "Wrote %d description(s) to %s", len(rows), report_path
+        )
+        return 0
+    finally:
+        db.close()
+
+
+def run_label_vault(config: dict) -> int:
+    """Derive which cat(s) each vault photo shows (nero/nuvola/both/unclear).
+
+    First pass uses the stored vision descriptions heuristically (colours:
+    black cat -> Nero, gray/white/blue-eyed -> Nuvola). Photos that stay
+    `unclear` get a targeted vision call with an identity prompt; anything
+    still unresolved stays `unclear`. Persists each label in `vault_subjects`
+    (with the derivation method) and writes a `data/labels.md` digest.
+    """
+    pipeline_cfg = config.get("pipeline", {})
+    ollama_cfg = config.get("ollama", {})
+    model = ollama_cfg.get("vision_model", "qwen3-vl:8b")
+    report_path = Path(pipeline_cfg.get("labels_report", "data/labels.md"))
+
+    db = DBManager(pipeline_cfg.get("db_path", "data/pipeline.db"))
+    try:
+        assets = db.list_vault_media("image")
+        if not assets:
+            logger.info("No image assets in the vault; nothing to label")
+            return 0
+
+        analyzer = VisualAnalyzer(
+            base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
+            model=model,
+            timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
+            num_predict=ollama_cfg.get("num_predict", 512),
+            max_side=ollama_cfg.get("max_side", 1280),
+            keep_alive=ollama_cfg.get("keep_alive", "30m"),
+        )
+        rows: list[tuple[dict, str, str, str, str | None]] = []
+        unresolved = 0
+        vision_total = 0
+
+        for i, asset in enumerate(assets, start=1):
+            description = db.get_latest_vision_for_vault(asset["id"])
+            label = _classify_subject_heuristic(description)
+            method = "heuristic"
+            error = None
+            response = None
+            if label == "unclear":
+                path = Path(asset["stored_path"])
+                if not path.exists():
+                    error = f"file missing ({path.name})"
+                    unresolved += 1
+                else:
+                    vision_total += 1
+                    try:
+                        response = analyzer.analyze(path, IDENTIFY_PROMPT)
+                    except OllamaUnavailableError as exc:
+                        error = f"vision failed: {exc}"
+                        unresolved += 1
+                    else:
+                        vlabel = _parse_vision_label(response)
+                        if vlabel:
+                            label, method = vlabel, "vision"
+                        else:
+                            error = "vision did not return a label"
+                            unresolved += 1
+            db.upsert_vault_subject(asset["id"], label, method=method)
+            rows.append((asset, label, method, response, error))
+            try:
+                print(
+                    f"[{i}/{len(assets)}] asset #{asset['id']} "
+                    f"{Path(asset['stored_path']).name}: {label} ({method})"
+                    + (f" [{error}]" if error else "")
+                )
+            except UnicodeEncodeError:
+                print(f"[{i}/{len(assets)}] asset #{asset['id']} -> {label}")
+
+        lines = [
+            "# Vault Subject Labels (Nero / Nuvola)",
+            f"Generated {datetime.now(UTC).isoformat()}",
+            "",
+        ]
+        counts: dict[str, int] = {}
+        for asset, label, method, response, error in rows:
+            counts[label] = counts.get(label, 0) + 1
+            lines.append(
+                f"## Asset #{asset['id']} — {asset['original_filename']}"
+            )
+            lines.append(f"label: **{label}** (via {method})")
+            if error:
+                lines.append(f"_{error}_")
+            lines.append("")
+        lines.append("---")
+        lines.append("## Summary")
+        lines.append("")
+        for label in ("nero", "nuvola", "both", "unclear"):
+            lines.append(f"- **{label}:** {counts.get(label, 0)}")
+        lines.append("")
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("\n".join(lines), encoding="utf-8")
+        logger.info(
+            "Labeled %d asset(s) (%d unresolved); %d targeted vision call(s); "
+            "digest at %s",
+            len(rows),
+            unresolved,
+            vision_total,
+            report_path,
         )
         return 0
     finally:
@@ -846,6 +1030,12 @@ def main(argv: list[str] | None = None) -> int:
         "data/drafts_<account>.md, then exit; requires --account",
     )
     parser.add_argument(
+        "--label-vault",
+        action="store_true",
+        help="Derive subject labels (nero/nuvola/both/unclear) for all vault "
+        "image assets and write data/labels.md, then exit",
+    )
+    parser.add_argument(
         "--resolve-chat",
         action="store_true",
         help="Resolve the vault channel's numeric chat id and print it",
@@ -874,6 +1064,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_vault_sync(cfg)
     if args.describe_vault:
         return run_describe_vault(cfg)
+    if args.label_vault:
+        return run_label_vault(cfg)
     if args.drafts_vault:
         if not args.account:
             parser.error("--drafts-vault requires --account")
