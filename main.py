@@ -144,6 +144,162 @@ def _write_descriptions_report(
     return report_path
 
 
+def _write_drafts_report(
+    report_path: Path,
+    persona_name: str,
+    rows: list[tuple[dict, dict | None, str | None]],
+) -> Path:
+    """Write the human-reviewable per-persona draft digest."""
+    lines = [
+        f"# Vault AI Drafts ({persona_name})",
+        f"Generated {datetime.now(UTC).isoformat()}",
+        "",
+    ]
+    for asset, draft, error in rows:
+        lines.append(f"## Asset #{asset['id']} — {asset['original_filename']}")
+        if error:
+            lines.append(f"_{error}_")
+        elif draft:
+            hashtags = draft.get("hashtags") or []
+            lines.append(f"**reel_text:** {draft.get('reel_text', '')}")
+            lines.append(f"**caption:** {draft.get('caption', '')}")
+            lines.append(
+                "**hashtags:** " + " ".join(f"#{h}" for h in hashtags)
+            )
+        lines.append(f"`{asset['stored_path']}`")
+        lines.append("")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return report_path
+
+
+def run_drafts_vault(config: dict, account_key: str) -> int:
+    """Batch persona-driven drafts for vault image assets.
+
+    Uses the stored `vault_analysis` descriptions as visual context and runs
+    the pipeline text model to produce a {reel_text, caption, hashtags} draft
+    for the given persona over every described asset that has no draft yet.
+    Skips videos and assets without a stored description. Persists each draft
+    in `vault_drafts` and writes a `data/drafts_<account>.md` digest.
+    Idempotent: re-running only covers assets still missing a draft. A failed
+    or empty generation is retried once per asset, then the asset is skipped
+    (recorded in the report) so one slow call does not abort the batch.
+    """
+    pipeline_cfg = config.get("pipeline", {})
+    ollama_cfg = config.get("ollama", {})
+    persona_cfg = config.get("personas", {})
+    vision_model = ollama_cfg.get("vision_model", "qwen3-vl:8b")
+    text_model = ollama_cfg.get("text_model", "qwen2.5")
+    report_path = Path(
+        pipeline_cfg.get("drafts_report", f"data/drafts_{account_key}.md")
+    )
+
+    db = DBManager(pipeline_cfg.get("db_path", "data/pipeline.db"))
+    try:
+        assets = db.list_vault_media("image")
+        if not assets:
+            logger.info("No image assets in the vault; nothing to draft")
+            return 0
+        personas = PersonaStore(
+            persona_cfg.get("config_path", "config/personas.json")
+        )
+        persona = personas.get(account_key)
+        missing = [
+            a
+            for a in assets
+            if db.get_vault_analysis(a["id"], vision_model) is not None
+            and db.get_vault_draft(a["id"], persona["name"]) is None
+        ]
+        if not missing:
+            logger.info(
+                "No image assets without a %s draft remain "
+                "(all described assets are already drafted)",
+                persona["name"],
+            )
+            return 0
+
+        generator = PromptGenerator(
+            base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
+            model=text_model,
+            timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
+        )
+        logger.info(
+            "Generating %d draft(s) with %s for persona '%s' (sequential)",
+            len(missing),
+            text_model,
+            persona["name"],
+        )
+        rows: list[tuple[dict, dict | None, str | None]] = []
+
+        def draft_with_retry(description: str) -> tuple[dict, str | None]:
+            """Generate once, retry once on failure or an empty result."""
+            try:
+                draft = generator.generate(persona, description)
+                if draft.get("caption"):
+                    return draft, None
+                raise OllamaUnavailableError("empty caption returned")
+            except OllamaUnavailableError as exc:
+                logger.warning(
+                    "Draft generation failed, retrying once: %s", exc
+                )
+                try:
+                    draft = generator.generate(persona, description)
+                except OllamaUnavailableError as exc2:
+                    return {}, str(exc2)
+                if not draft.get("caption"):
+                    return {}, "empty caption returned twice"
+                return draft, None
+
+        for i, asset in enumerate(missing, start=1):
+            analysis = db.get_vault_analysis(asset["id"], vision_model)
+            if analysis is None:
+                rows.append(
+                    (asset, None, "no stored description to draft from")
+                )
+                continue
+            description = analysis["description"]
+            try:
+                draft, draft_error = draft_with_retry(description)
+            except Exception as exc:  # noqa: BLE001 - one bad asset not fatal
+                logger.warning(
+                    "Draft failed for asset #%d (%s): %s",
+                    asset["id"],
+                    asset["original_filename"],
+                    exc,
+                )
+                rows.append((asset, None, f"draft failed: {exc}"))
+                continue
+            if draft_error is not None:
+                logger.warning(
+                    "Skipping asset #%d (%s): %s",
+                    asset["id"],
+                    asset["original_filename"],
+                    draft_error,
+                )
+                rows.append((asset, None, f"draft failed: {draft_error}"))
+                continue
+            db.upsert_vault_draft(
+                vault_media_id=asset["id"],
+                persona_name=persona["name"],
+                model=text_model,
+                reel_text=draft.get("reel_text", ""),
+                caption=draft.get("caption", ""),
+                hashtags=",".join(draft.get("hashtags") or []),
+            )
+            rows.append((asset, draft, None))
+            print(
+                f"[{i}/{len(missing)}] asset #{asset['id']} "
+                f"({asset['original_filename']}): "
+                f"{draft['caption'][:140]}"
+            )
+
+        _write_drafts_report(report_path, persona["name"], rows)
+        logger.info("Wrote %d draft(s) to %s", len(rows), report_path)
+        return 0
+    finally:
+        db.close()
+
+
 def run_describe_vault(config: dict) -> int:
     """Batch vision descriptions for vault image assets (T034).
 
@@ -663,6 +819,13 @@ def main(argv: list[str] | None = None) -> int:
         "asset that lacks one and write data/descriptions.md, then exit",
     )
     parser.add_argument(
+        "--drafts-vault",
+        action="store_true",
+        help="Batch-run persona drafts (reel hook + caption + hashtags) over "
+        "every described vault image asset that has no draft yet and write "
+        "data/drafts_<account>.md, then exit; requires --account",
+    )
+    parser.add_argument(
         "--resolve-chat",
         action="store_true",
         help="Resolve the vault channel's numeric chat id and print it",
@@ -691,6 +854,11 @@ def main(argv: list[str] | None = None) -> int:
         return run_vault_sync(cfg)
     if args.describe_vault:
         return run_describe_vault(cfg)
+    if args.drafts_vault:
+        if not args.account:
+            parser.error("--drafts-vault requires --account")
+            return 2
+        return run_drafts_vault(cfg, args.account)
     if args.resolve_chat:
         return run_resolve_chat(cfg, bot_token=args.vault_bot_token)
     if args.retry:

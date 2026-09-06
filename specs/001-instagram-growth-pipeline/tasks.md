@@ -201,6 +201,28 @@ descriptions per vault asset so the user can sanity-check what the model
 
 ---
 
+## Phase 8: Batch Persona Drafts (captions for both personas)
+
+**Purpose**: Turn the 155 stored descriptions into reviewable Instagram drafts
+(reel hook + caption + hashtags) in each persona's voice, so the operator can
+pick publishable content without running the full submit/approve loop per photo.
+
+- [X] T036 Add a `vault_drafts` table (`vault_media_id`, `persona_name`,
+      `model`, `reel_text`, `caption`, `hashtags`, `created_at`,
+      `UNIQUE(vault_media_id, persona_name)`) with `upsert_vault_draft()` and
+      `get_vault_draft()` in `src/database/db_manager.py`
+- [X] T037 Add `--drafts-vault` CLI in `main.py` (`run_drafts_vault` with
+      `--account cat_1|cat_2`) that runs the pipeline text model (qwen2.5)
+      sequentially over every described image asset lacking a draft for that
+      persona, persists results in `vault_drafts`, and writes a
+      `data/drafts_<account>.md` digest; re-runs are idempotent, failures are
+      retried once then skipped (recorded in the report)
+- [X] T038 Tests in `tests/unit/test_drafts_vault.py` for the draft table
+      helpers, the batch run (retry-once + skip-on-failure + idempotency),
+      and the no-described-assets case
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

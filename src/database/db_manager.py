@@ -92,6 +92,18 @@ CREATE TABLE IF NOT EXISTS vault_analysis (
     created_at TEXT NOT NULL,
     UNIQUE (vault_media_id, model)
 );
+
+CREATE TABLE IF NOT EXISTS vault_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vault_media_id INTEGER NOT NULL,
+    persona_name TEXT NOT NULL,
+    model TEXT NOT NULL,
+    reel_text TEXT NOT NULL DEFAULT '',
+    caption TEXT NOT NULL DEFAULT '',
+    hashtags TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE (vault_media_id, persona_name)
+);
 """
 
 VAULT_SOURCES = {"drop", "ai_generated", "telegram"}
@@ -318,6 +330,62 @@ class DBManager:
                     """,
                     (vault_media_id,),
                 ).fetchone()
+            return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # Vault drafts (per-persona generated Instagram content)
+    # ------------------------------------------------------------------
+
+    def upsert_vault_draft(
+        self,
+        *,
+        vault_media_id: int,
+        persona_name: str,
+        model: str,
+        reel_text: str = "",
+        caption: str = "",
+        hashtags: str = "",
+    ) -> None:
+        """Store/refresh a generated draft for a vault asset and persona."""
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO vault_drafts
+                    (vault_media_id, persona_name, model, reel_text,
+                     caption, hashtags, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(vault_media_id, persona_name) DO UPDATE SET
+                    model = excluded.model,
+                    reel_text = excluded.reel_text,
+                    caption = excluded.caption,
+                    hashtags = excluded.hashtags,
+                    created_at = excluded.created_at
+                """,
+                (
+                    vault_media_id,
+                    persona_name,
+                    model,
+                    reel_text,
+                    caption,
+                    hashtags,
+                    _utcnow(),
+                ),
+            )
+            self._conn.commit()
+
+    def get_vault_draft(
+        self, vault_media_id: int, persona_name: str
+    ) -> dict | None:
+        """Most recent stored draft for an asset and persona."""
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT * FROM vault_drafts
+                 WHERE vault_media_id = ? AND persona_name = ?
+                 ORDER BY created_at DESC, id DESC LIMIT 1
+                """,
+                (vault_media_id, persona_name),
+            ).fetchone()
             return dict(row) if row else None
 
     def insert_vault_media(
