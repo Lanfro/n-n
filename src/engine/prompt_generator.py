@@ -21,7 +21,14 @@ OUTPUT_INSTRUCTION = (
     '{"reel_text": "<3-7 word on-screen hook>", '
     '"caption": "<caption>", '
     '"hashtags": ["tag1", "tag2", ...]}\n'
-    "Do not include markdown fences or any other text."
+    "Include hashtags ONLY as the JSON 'hashtags' list, never inside the "
+    "caption text.\n"
+    "Here is a completed example for a photo of a sleepy cat:\n"
+    '{"reel_text": "Naps are a full-time job", '
+    '"caption": "Lying here takes practice. Humans keep interrupting.", '
+    '"hashtags": ["cat", "sleepycat", "catlife"]}\n'
+    'Write your own values for the described photo (do not copy the example '
+    "verbatim) and return only the JSON object, without code fences."
 )
 
 # Hashtags requiring no underscore/spaces; used to enrich generic output.
@@ -120,6 +127,19 @@ VISUAL CONTEXT:
             return dict(default)
 
     @staticmethod
+    def _strip_inline_hashtags(caption: str) -> str:
+        """Remove a trailing run of '#tag' tokens from the caption body.
+
+        Small local models tend to append the hashtags to the caption text in
+        addition to the JSON 'hashtags' list; publishing appends the list
+        again (_caption_from_draft), so the inline ones must be cut here.
+        """
+        if not caption:
+            return caption
+        stripped = re.sub(r"(?:\s+#[0-9A-Za-z_]+)+\s*$", "", caption)
+        return stripped.rstrip()
+
+    @staticmethod
     def _normalize_hashtags(tags: list, persona: dict) -> list[str]:
         cleaned = []
         for t in tags:
@@ -180,9 +200,12 @@ VISUAL CONTEXT:
             "hashtags": self._normalize_hashtags([], persona),
         }
         parsed = self._parse_json(raw, default=default)
+        caption = self._strip_inline_hashtags(
+            str(parsed.get("caption") or "").strip()
+        )
         return {
             "reel_text": str(parsed.get("reel_text") or "").strip(),
-            "caption": str(parsed.get("caption") or "").strip(),
+            "caption": caption,
             "hashtags": self._normalize_hashtags(
                 parsed.get("hashtags") or [], persona
             ),

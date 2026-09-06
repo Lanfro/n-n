@@ -146,3 +146,41 @@ def test_generate_falls_back_to_blank_on_bad_json(monkeypatch) -> None:
     out = gen.generate(PERSONA, "A grey cat on a sofa.")
     assert out["caption"] == ""
     assert out["hashtags"] == ["exoticshorthair", "exoticcats"]
+
+
+def test_generate_strips_inline_hashtags_from_caption(monkeypatch) -> None:
+    """A trailing '#tag' run inside the caption is removed on parse."""
+
+    def fake_post(url, json=None, timeout=120):
+        class R:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+            def json(self):
+                return {
+                    "response": '{"reel_text": "no naps", '
+                    '"caption": "Annoyed again. #exoticshorthair '
+                    '#catlogic #cynicalcat", '
+                    '"hashtags": ["exoticshorthair", "catlogic"]}'
+                }
+
+        return R()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    gen = PromptGenerator("http://localhost:11434", "qwen2.5")
+    out = gen.generate(PERSONA, "A grey cat on a sofa.")
+    assert out["caption"] == "Annoyed again."
+    assert out["hashtags"] == ["exoticshorthair", "catlogic"]
+
+
+def test_strip_inline_hashtags_mid_caption_untouched() -> None:
+    gen = PromptGenerator("http://localhost:11434", "qwen2.5")
+    # Only the *trailing* run is removed; mid-sentence tags survive.
+    text = "My #favorite spot on the shelf, as always."
+    assert gen._strip_inline_hashtags(text) == text
+    assert gen._strip_inline_hashtags("") == ""
+    assert gen._strip_inline_hashtags("  ") == ""
