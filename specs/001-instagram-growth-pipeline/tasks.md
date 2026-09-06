@@ -221,6 +221,16 @@ pick publishable content without running the full submit/approve loop per photo.
       helpers, the batch run (retry-once + skip-on-failure + idempotency),
       and the no-described-assets case
 
+### Notes (2026-09-06)
+
+- Text generation switched to `qwen2.5:3b` for the batch. A/B on the 8GB
+  box: `qwen2.5:latest` (7B) leaked hashtags into the caption body and left
+  ~0.5GB free RAM (pagefile pressure → empty-output deaths); `qwen2.5:3b`
+  is ~2x faster and holds ~3GB free, but echoed the old angle-bracket JSON
+  schema. `OUTPUT_INSTRUCTION` is now example-driven (fixes the echo) and
+  `PromptGenerator._strip_inline_hashtags` removes a trailing `#tag` run so
+  the publish path appends the JSON hashtags once. (T033-T038 + this note)
+
 ---
 
 ## Dependencies & Execution Order
