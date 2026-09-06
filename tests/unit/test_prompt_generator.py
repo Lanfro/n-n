@@ -149,7 +149,7 @@ def test_generate_falls_back_to_blank_on_bad_json(monkeypatch) -> None:
 
 
 def test_generate_strips_inline_hashtags_from_caption(monkeypatch) -> None:
-    """A trailing '#tag' run inside the caption is removed on parse."""
+    """Trailing '#tag' runs are removed from caption AND reel_text on parse."""
 
     def fake_post(url, json=None, timeout=120):
         class R:
@@ -162,7 +162,7 @@ def test_generate_strips_inline_hashtags_from_caption(monkeypatch) -> None:
 
             def json(self):
                 return {
-                    "response": '{"reel_text": "no naps", '
+                    "response": '{"reel_text": "Scared of dust #catdrama", '
                     '"caption": "Annoyed again. #exoticshorthair '
                     '#catlogic #cynicalcat", '
                     '"hashtags": ["exoticshorthair", "catlogic"]}'
@@ -174,6 +174,7 @@ def test_generate_strips_inline_hashtags_from_caption(monkeypatch) -> None:
     gen = PromptGenerator("http://localhost:11434", "qwen2.5")
     out = gen.generate(PERSONA, "A grey cat on a sofa.")
     assert out["caption"] == "Annoyed again."
+    assert out["reel_text"] == "Scared of dust"
     assert out["hashtags"] == ["exoticshorthair", "catlogic"]
 
 

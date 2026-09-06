@@ -203,8 +203,11 @@ VISUAL CONTEXT:
         caption = self._strip_inline_hashtags(
             str(parsed.get("caption") or "").strip()
         )
+        reel_text = self._strip_inline_hashtags(
+            str(parsed.get("reel_text") or "").strip()
+        )
         return {
-            "reel_text": str(parsed.get("reel_text") or "").strip(),
+            "reel_text": reel_text,
             "caption": caption,
             "hashtags": self._normalize_hashtags(
                 parsed.get("hashtags") or [], persona
