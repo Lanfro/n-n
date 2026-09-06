@@ -225,6 +225,7 @@ def run_drafts_vault(config: dict, account_key: str) -> int:
             keep_alive=ollama_cfg.get("keep_alive", "30m"),
             num_predict=ollama_cfg.get("num_predict", 512),
         )
+        topics = persona.get("topics") or []
         logger.info(
             "Generating %d draft(s) with %s for persona '%s' (sequential)",
             len(missing),
@@ -233,24 +234,30 @@ def run_drafts_vault(config: dict, account_key: str) -> int:
         )
         rows: list[tuple[dict, dict | None, str | None]] = []
 
-        def draft_with_retry(description: str) -> tuple[dict, str | None]:
-            """Generate once, retry once on failure or an empty result."""
+        def draft_with_retry(
+            description: str, topic: str | None = None
+        ) -> tuple[dict, str | None]:
+            """Generate once, retry once on failure or an unusable result."""
+            kwargs = {"topic": topic} if topic else {}
+
+            def attempt() -> dict:
+                draft = generator.generate(persona, description, **kwargs)
+                if PromptGenerator.is_usable(
+                    draft.get("reel_text", ""), draft.get("caption", "")
+                ):
+                    return draft
+                raise OllamaUnavailableError("empty or unusable draft returned")
+
             try:
-                draft = generator.generate(persona, description)
-                if draft.get("caption"):
-                    return draft, None
-                raise OllamaUnavailableError("empty caption returned")
+                return attempt(), None
             except OllamaUnavailableError as exc:
                 logger.warning(
                     "Draft generation failed, retrying once: %s", exc
                 )
                 try:
-                    draft = generator.generate(persona, description)
+                    return attempt(), None
                 except OllamaUnavailableError as exc2:
                     return {}, str(exc2)
-                if not draft.get("caption"):
-                    return {}, "empty caption returned twice"
-                return draft, None
 
         for i, asset in enumerate(missing, start=1):
             analysis = db.get_vault_analysis(asset["id"], vision_model)
@@ -260,8 +267,9 @@ def run_drafts_vault(config: dict, account_key: str) -> int:
                 )
                 continue
             description = analysis["description"]
+            topic = topics[asset["id"] % len(topics)] if topics else None
             try:
-                draft, draft_error = draft_with_retry(description)
+                draft, draft_error = draft_with_retry(description, topic)
             except Exception as exc:  # noqa: BLE001 - one bad asset not fatal
                 logger.warning(
                     "Draft failed for asset #%d (%s): %s",

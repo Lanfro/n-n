@@ -46,6 +46,99 @@ def test_generate_sends_keep_alive_when_configured(monkeypatch) -> None:
     assert captured["json"]["keep_alive"] == "30m"
 
 
+def test_generate_injects_forced_topic_when_set(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(url, json=None, timeout=120):
+        captured["json"] = json
+
+        class R:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+            def json(self):
+                return {
+                    "response": '{"reel_text": "the nap calls", '
+                    '"caption": "Sneaking under the bed.", '
+                    '"hashtags": ["exoticshorthair"]}'
+                }
+
+        return R()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    gen = PromptGenerator("http://localhost:11434", "qwen2.5")
+    gen.generate(PERSONA, "A grey cat on a sofa.", topic="the cardboard box")
+    assert "the cardboard box" in captured["json"]["prompt"]
+    assert "FORCED SUBJECT" in captured["json"]["prompt"]
+    assert "vacuums" in captured["json"]["prompt"]
+
+
+def test_generate_no_topic_by_default(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(url, json=None, timeout=120):
+        captured["json"] = json
+
+        class R:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+            def json(self):
+                return {"response": '{"reel_text": "hi", "caption": "ok"}'}
+
+        return R()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    gen = PromptGenerator("http://localhost:11434", "qwen2.5")
+    gen.generate(PERSONA, "A grey cat on a sofa.")
+    assert "FORCED SUBJECT" not in captured["json"]["prompt"]
+
+
+def test_is_usable_rejects_template_remnants() -> None:
+    gen = PromptGenerator("http://localhost:11434", "qwen2.5")
+    assert not gen.is_usable("<3-7 word on-screen hook>", "Paws raised.")
+    assert not gen.is_usable("<3", "Overreaction to the vacuum.")
+    assert not gen.is_usable("loud!", '"caption": "hello"')
+    assert not gen.is_usable("", "Still empty.")
+    assert not gen.is_usable("hook", "")
+    assert gen.is_usable("a real hook", "A real caption.")
+
+
+def test_generate_returns_empty_on_template_remnant(monkeypatch) -> None:
+    def fake_post(url, json=None, timeout=120):
+        class R:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+            def json(self):
+                return {
+                    "response": '{"reel_text": "<3-7 word on-screen hook>", '
+                    '"caption": "Paws raised like a sneaky kitty!", '
+                    '"hashtags": ["exoticshorthair"]}'
+                }
+
+        return R()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    gen = PromptGenerator("http://localhost:11434", "qwen2.5")
+    out = gen.generate(PERSONA, "A grey cat on a sofa.")
+    assert out["caption"] == ""
+    assert out["reel_text"] == ""
+    assert "exoticshorthair" in out["hashtags"]
+
+
 def test_generate_omits_keep_alive_by_default(monkeypatch) -> None:
     captured = {}
 

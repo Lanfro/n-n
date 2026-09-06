@@ -31,6 +31,12 @@ OUTPUT_INSTRUCTION = (
     "verbatim) and return only the JSON object, without code fences."
 )
 
+# Characters that reveal the model echoed output schema/JSON instead of
+# writing a real draft (schema placeholders like "<3-7 word on-screen hook>"
+# or stray JSON braces/quotes). A reel_text or caption containing any of them
+# is treated as garbage and never persisted.
+TEMPLATE_REMNANT_CHARS = set('<>{}[]"')
+
 # Hashtags requiring no underscore/spaces; used to enrich generic output.
 CANONICAL_HASHTAGS = [
     "exoticshorthair",
@@ -88,7 +94,9 @@ class PromptGenerator:
         self.keep_alive = keep_alive
         self.num_predict = num_predict
 
-    def _assemble_prompt(self, persona: dict, vision_description: str) -> str:
+    def _assemble_prompt(
+        self, persona: dict, vision_description: str, topic: str | None = None
+    ) -> str:
         reel_rules = persona.get("reel_rules", {})
         caption_rules = persona.get("caption_rules", {})
         max_reel_words = reel_rules.get("max_words", 7)
@@ -96,13 +104,20 @@ class PromptGenerator:
         hashtag_count = persona.get("hashtag_count", 12)
 
         system = persona["system_prompt"]
+        forced_subject = ""
+        if topic:
+            forced_subject = (
+                f"\nFORCED SUBJECT:\n"
+                f"This scene must focus on: {topic}. "
+                "Do NOT mention vacuums, cleaning appliances, or housework.\n"
+            )
         return f"""{system}
 
 OUTPUT CONSTRAINTS:
 - REEL_TEXT must be at most {max_reel_words} words and use {caption_rules.get('tone', 'the accent above')}.
 - CAPTION must be at most {max_caption_sentences} short sentences and {caption_rules.get('style_note', '')}.
 - HASHTAGS must include exactly {hashtag_count} niche hashtags, starting with {', '.join('#' + h for h in persona.get('base_hashtags', []))}.
-
+{forced_subject}
 VISUAL CONTEXT:
 "{vision_description}"
 
@@ -163,12 +178,13 @@ VISUAL CONTEXT:
         vision_description: str,
         *,
         system_override: str | None = None,
+        topic: str | None = None,
     ) -> dict:
         """Generate and return {reel_text, caption, hashtags}."""
         if system_override:
             persona = {**persona, "system_prompt": system_override}
 
-        prompt = self._assemble_prompt(persona, vision_description)
+        prompt = self._assemble_prompt(persona, vision_description, topic=topic)
         payload: dict = {
             "model": self.model,
             "prompt": prompt,
@@ -206,10 +222,30 @@ VISUAL CONTEXT:
         reel_text = self._strip_inline_hashtags(
             str(parsed.get("reel_text") or "").strip()
         )
-        return {
+        result = {
             "reel_text": reel_text,
             "caption": caption,
             "hashtags": self._normalize_hashtags(
                 parsed.get("hashtags") or [], persona
             ),
         }
+        if not self.is_usable(result["reel_text"], result["caption"]):
+            return {
+                "reel_text": "",
+                "caption": "",
+                "hashtags": result["hashtags"],
+            }
+        return result
+
+    @staticmethod
+    def is_usable(reel_text: str, caption: str) -> bool:
+        """True when both fields are non-empty and free of schema remnants.
+
+        A draft whose reel_text or caption is empty, or that contains leftover
+        JSON/schema characters (e.g. "<3-7 word on-screen hook>"), is not
+        usable and must never be persisted or published.
+        """
+        if not str(reel_text or "").strip() or not str(caption or "").strip():
+            return False
+        both = f"{reel_text} {caption}"
+        return not (set(both) & TEMPLATE_REMNANT_CHARS)
