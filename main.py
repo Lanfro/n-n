@@ -195,6 +195,28 @@ def run_describe_vault(config: dict) -> int:
             model,
         )
         rows: list[tuple[dict, str | None, str | None]] = []
+
+        def describe_with_retry(asset_path: Path):
+            """Analyze once, retry once on failure or an empty response."""
+            try:
+                text = analyzer.analyze(asset_path, DESCRIBE_PROMPT)
+                if text:
+                    return text, None
+                raise OllamaUnavailableError("empty description returned")
+            except OllamaUnavailableError as exc:
+                logger.warning(
+                    "Vision call failed for %s, retrying once: %s",
+                    asset_path.name,
+                    exc,
+                )
+                try:
+                    text = analyzer.analyze(asset_path, DESCRIBE_PROMPT)
+                except OllamaUnavailableError as exc2:
+                    return None, str(exc2)
+                if not text:
+                    return None, "empty description returned twice"
+                return text, None
+
         for i, asset in enumerate(missing, start=1):
             path = Path(asset["stored_path"])
             if not path.exists():
@@ -204,25 +226,7 @@ def run_describe_vault(config: dict) -> int:
                 rows.append((asset, None, "file missing"))
                 continue
             try:
-                description = analyzer.analyze(path, DESCRIBE_PROMPT)
-            except OllamaUnavailableError as exc:
-                logger.warning(
-                    "Vision call failed for asset #%d (%s), retrying once: %s",
-                    asset["id"],
-                    path.name,
-                    exc,
-                )
-                try:
-                    description = analyzer.analyze(path, DESCRIBE_PROMPT)
-                except OllamaUnavailableError as exc2:
-                    logger.warning(
-                        "Skipping asset #%d (%s): %s",
-                        asset["id"],
-                        path.name,
-                        exc2,
-                    )
-                    rows.append((asset, None, f"analysis failed: {exc2}"))
-                    continue
+                description, describe_error = describe_with_retry(path)
             except Exception as exc:  # noqa: BLE001 - one bad image not fatal
                 logger.warning(
                     "Failed to describe asset #%d (%s): %s",
@@ -231,6 +235,15 @@ def run_describe_vault(config: dict) -> int:
                     exc,
                 )
                 rows.append((asset, None, f"analysis failed: {exc}"))
+                continue
+            if describe_error is not None:
+                logger.warning(
+                    "Skipping asset #%d (%s): %s",
+                    asset["id"],
+                    path.name,
+                    describe_error,
+                )
+                rows.append((asset, None, f"analysis failed: {describe_error}"))
                 continue
             db.upsert_vault_analysis(
                 vault_media_id=asset["id"],

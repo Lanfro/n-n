@@ -297,3 +297,62 @@ def test_describe_batch_retries_once_then_skips(tmp_path, monkeypatch) -> None:
     report = (tmp_path / "descriptions.md").read_text(encoding="utf-8")
     assert "permanent timeout" in report
     assert len([l for l in report.splitlines() if l.startswith("## Asset")]) == 3
+
+
+def test_describe_batch_empty_result_retried_then_skipped(
+    tmp_path, monkeypatch
+) -> None:
+    """An empty response is treated as a failure: retried, then skipped."""
+    import main
+
+    db = DBManager(tmp_path / "pipeline.db")
+    vault = MediaVault(db, tmp_path / "vault")
+    _make_jpeg(tmp_path, 100, 100, "e1.jpg", color="blue")
+    _make_jpeg(tmp_path, 90, 100, "e2.jpg", color="purple")
+    for name in ("e1.jpg", "e2.jpg"):
+        vault.ingest(tmp_path / name, source="telegram")
+    by_name = {
+        Path(a["stored_path"]).name: a["original_filename"]
+        for a in db.list_vault_media("image")
+    }
+    db.close()
+
+    config = {
+        "pipeline": {
+            "db_path": str(tmp_path / "pipeline.db"),
+            "descriptions_report": str(tmp_path / "descriptions.md"),
+        },
+        "ollama": {
+            "base_url": "http://localhost:11434",
+            "vision_model": "qwen3-vl:8b",
+            "timeout_seconds": 10,
+        },
+    }
+
+    hits = {}
+
+    def analyze(self, path, prompt):
+        name = by_name[Path(path).name]
+        hits[name] = hits.get(name, 0) + 1
+        if name == "e1.jpg" and hits[name] == 1:
+            return ""  # empty once, then a real description
+        if name == "e2.jpg":
+            return ""  # always empty -> skip
+        return f"real-{name}"
+
+    monkeypatch.setattr(main.VisualAnalyzer, "analyze", analyze)
+    assert main.run_describe_vault(config) == 0
+
+    db = DBManager(tmp_path / "pipeline.db")
+    rows = {
+        a["original_filename"]: db.get_vault_analysis(a["id"], "qwen3-vl:8b")
+        for a in db.list_vault_media("image")
+    }
+    assert rows["e1.jpg"]["description"] == "real-e1.jpg"
+    assert rows["e2.jpg"] is None  # skipped, no analysis row
+    assert hits["e1.jpg"] == 2
+    assert hits["e2.jpg"] == 2
+    db.close()
+
+    report = (tmp_path / "descriptions.md").read_text(encoding="utf-8")
+    assert "empty description returned twice" in report
