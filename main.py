@@ -222,6 +222,8 @@ def run_drafts_vault(config: dict, account_key: str) -> int:
             base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
             model=text_model,
             timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
+            keep_alive=ollama_cfg.get("keep_alive", "30m"),
+            num_predict=ollama_cfg.get("num_predict", 512),
         )
         logger.info(
             "Generating %d draft(s) with %s for persona '%s' (sequential)",
@@ -643,6 +645,7 @@ def run_pipeline(
             model=ollama_cfg.get("text_model", "qwen2.5"),
             timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
             keep_alive=ollama_cfg.get("keep_alive", "30m"),
+            num_predict=ollama_cfg.get("num_predict", 512),
         )
         logger.info("Generating content for persona '%s' ...", persona["name"])
         generated = generator.generate(persona, description)
@@ -746,6 +749,7 @@ def run_retry(config: dict, post_id: int, *, dry_run: bool = True) -> int:
                 model=ollama_cfg.get("text_model", "qwen2.5"),
                 timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
                 keep_alive=ollama_cfg.get("keep_alive", "30m"),
+            num_predict=ollama_cfg.get("num_predict", 512),
             )
             logger.info(
                 "Generating content for persona '%s' ...", persona["name"]

@@ -69,6 +69,35 @@ def test_generate_omits_keep_alive_by_default(monkeypatch) -> None:
     gen = PromptGenerator("http://localhost:11434", "qwen2.5")
     gen.generate(PERSONA, "A grey cat on a sofa.")
     assert "keep_alive" not in captured["json"]
+    assert "options" not in captured["json"]
+
+
+def test_generate_sends_num_predict_when_configured(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(url, json=None, timeout=120):
+        captured["json"] = json
+
+        class R:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+            def json(self):
+                return {"response": '{"reel_text": "hi", "caption": "ok"}'}
+
+        return R()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    gen = PromptGenerator(
+        "http://localhost:11434", "qwen2.5", num_predict=512
+    )
+    gen.generate(PERSONA, "A grey cat on a sofa.")
+    assert captured["json"]["options"] == {"num_predict": 512}
+    assert "keep_alive" not in captured["json"]
 
 
 def test_generate_parses_fenced_json(monkeypatch) -> None:
