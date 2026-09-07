@@ -86,3 +86,14 @@ def test_retry_missing_media_fails(db, config, tmp_path):
     post_id = db.create_post("cat_1", str(tmp_path / "gone.jpg"))
     assert db.transition(post_id, "FAILED")
     assert run_retry(config, post_id, dry_run=True) == 2
+
+
+def test_retry_clears_stale_meta_error_on_success(db, config, tmp_path):
+    post_id, _ = _failed_post(db, tmp_path, vision_description="vision only")
+    db.set_publishing_result(
+        post_id, meta_error="Ollama request timed out after 300s."
+    )
+    assert run_retry(config, post_id, dry_run=True) == 0
+    post = db.get_post(post_id)
+    assert post["status"] == "PUBLISHED"
+    assert post["meta_error"] is None

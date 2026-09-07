@@ -757,6 +757,9 @@ def _approve_and_publish(
     if not db.transition(post_id, "PUBLISHED"):
         logger.error("Post %d could not enter PUBLISHED", post_id)
         return 1
+    # A retried post may still carry a meta_error from the earlier FAILED
+    # attempt; a successful publish supersedes it.
+    db.set_publishing_result(post_id, meta_error=None)
     logger.info("Pipeline complete for post %d", post_id)
     return 0
 

@@ -279,6 +279,24 @@ pick publishable content without running the full submit/approve loop per photo.
   Nuvola 77 publish-ready (2 WARN), 16 excluded. 96 tests + ruff + dry-run
   smoke green.
 
+### Notes 4 (2026-09-07, Phase 1 coherence)
+
+- Complete-flow test vector: copied a Nuvola photo resized through PIL as a
+  fresh asset, ran the real single-image pipeline (vault sync + Telegram
+  archive, live qwen3-vl vision, live draft, Telegram approval round,
+  dry-run publish) - post #16 PUBLISHED via a real human "Approve &
+  Schedule" tap.
+- The first vision attempt failed at the 300s timeout (cold 8B model on
+  this CPU box); `config.local.yaml` `ollama.timeout_seconds` raised to 900.
+- Test asset #160 is now folded into the identity corpus: described,
+  labeled `nuvola` (vision), and drafted. Full `--label-vault` re-scan moved
+  nero 62→61, nuvola 51→54, both 26, unclear 16→15.
+- `_approve_and_publish` now clears `meta_error` on the PUBLISHED transition
+  so a retried post no longer shows the earlier FAILED error
+  (post #16 backfilled). New test in `test_retry.py`.
+- Shortlist now: Nero 87 (0 WARN), Nuvola 80 (2 WARN), 15 excluded.
+  97 tests + ruff + smoke green.
+
 ---
 
 ## Dependencies & Execution Order
