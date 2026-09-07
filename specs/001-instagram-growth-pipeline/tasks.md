@@ -249,6 +249,36 @@ pick publishable content without running the full submit/approve loop per photo.
   shortlist: 154/155 per persona (asset #1 = cartoon-bear placeholder,
   source `drop`, excluded), 7-9 WARN reels over 7 words.
 
+### Notes 3 (2026-09-07, identity pass: Nero/Nuvola)
+
+- The vault holds both cats; drafts were generated under both voices for
+  every photo. The user revealed the real identities: cat_1 = Nero (solid
+  black, tooth sticking out since birth, @nero_susuwatari), cat_2 = Nuvola
+  (his gray-and-white sister, blue eyes, always-grumpy face,
+  @duchessa_marrabbio).
+- Audit of the stored descriptions showed the system caught coarse traits
+  (87/155 mention black, 58/155 gray/white) but never identity: the tooth
+  appeared 0/155 times, blue eyes 1/155, and there was no persona-to-photo
+  binding. This motivated an explicit subject-identity layer.
+- Identity layer (commit 795f319): `vault_subjects` table
+  (nero/nuvola/both/unclear + derivation method) in db_manager;
+  `--label-vault` in main.py runs a heuristic over stored descriptions
+  (black cat -> nero, gray/white/blue-eyed -> nuvola) then a targeted
+  qwen3-vl:8b identity call only for photos that stay unclear, writing
+  `data/labels.md`. Result: nero 62, nuvola 51, both 26, unclear 16 (close-
+  ups and the cartoon-bear placeholder #1 stay unclear/excluded).
+- `config/personas.json`: personas are now Nero/Nuvola with real handles and
+  appearance/sibling prompts, keeping their cynical/dramatic voices.
+  `--drafts-vault` gates on subject labels (nero/both -> Nero,
+  nuvola/both -> Nuvola, unclear -> skip; unlabeled = legacy allow).
+- Regeneration: 165 draft rows (Nero 88 = 62 solo + 26 both; Nuvola 77 =
+  51 solo + 26 both). Two Nuvola drafts (#144 nuvola, #148 both) needed a
+  repeat run after "empty or unusable" flakes; #144 reproduced fine and was
+  completed on the third attempt (transient small-model JSON failures).
+- `data/ready_to_post.md` rebuilt per cat: Nero 88 publish-ready (0 WARN),
+  Nuvola 77 publish-ready (2 WARN), 16 excluded. 96 tests + ruff + dry-run
+  smoke green.
+
 ---
 
 ## Dependencies & Execution Order
