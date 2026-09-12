@@ -19,6 +19,10 @@ data/input_media/*
 data/vault/*
 !data/vault/.gitkeep
 
+# Twin generator env & outputs
+.venv-gen/
+data/generated/*
+
 # Config secrets (keep template)
 config/*.local.yaml
 

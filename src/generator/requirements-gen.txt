@@ -1,0 +1,12 @@
+# Twin image generator env (.venv-gen, Python 3.12).
+# Created with:
+#   uv venv .venv-gen --python 3.12
+#   uv pip install --python .venv-gen torch --index-url https://download.pytorch.org/whl/cpu
+#   uv pip install --python .venv-gen -r src/generator/requirements-gen.txt
+torch
+diffusers
+accelerate
+safetensors
+pillow
+numpy
+psutil
