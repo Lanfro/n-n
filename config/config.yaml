@@ -72,3 +72,15 @@ pipeline:
   db_path: "data/pipeline.db"
   # Require explicit human approval before publishing
   require_approval: true
+
+# Local generative "digital twin" content (self-contained; separate from the
+# photo pipeline and from Instagram/Telegram publishing)
+creative:
+  sets_path: "config/creative/sets.json"
+  out_root: "data/generated"
+  # Python 3.12 venv that hosts the torch/diffusers stack (see
+  # src/generator/requirements-gen.txt). The main env stays on 3.14.
+  gen_env_python: ".venv-gen/Scripts/python.exe"
+  generator_script: "src/generator/run_generate.py"
+  model: "Lykon/dreamshaper-8"
+  steps: 24

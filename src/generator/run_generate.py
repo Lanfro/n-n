@@ -24,7 +24,7 @@ import torch
 from diffusers import AutoPipelineForImage2Image, AutoPipelineForText2Image
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from src.generator.anchors import prep_square  # noqa: E402
+from src.generator.anchors import prep_square
 
 MODEL = "Lykon/dreamshaper-8"
 torch.set_num_threads(4)

@@ -1,0 +1,82 @@
+{
+  "parallel_lives": {
+    "name": "Parallel Lives",
+    "description": "the same daily routine in different locations around the world",
+    "style": "photorealistic, soft natural light, shallow depth of field, 4:5 vertical portrait",
+    "negative": "cartoon, drawing, lowres, blurry, deformed, extra limbs, multiple cats, duplicate cat, text, watermark",
+    "denoise": 0.45,
+    "shots": 5,
+    "cat": "both",
+    "scenes": [
+      "breakfast at a tiny Parisian bistro table",
+      "the morning nap on a Tokyo balcony overlooking the city",
+      "an afternoon sunbeam in a grand library reading room",
+      "window-watching a rainy London street at dusk",
+      "evening lamp-lit reading on a vintage velvet armchair"
+    ]
+  },
+  "career_cats": {
+    "name": "Career Cats",
+    "description": "the cats in absurd but serious professions",
+    "style": "photorealistic, cinematic lighting, shallow depth of field, 4:5 vertical portrait",
+    "negative": "cartoon, drawing, lowres, blurry, deformed, extra limbs, multiple cats, duplicate cat, text, watermark",
+    "denoise": 0.5,
+    "shots": 5,
+    "cat": "both",
+    "scenes": [
+      "as a 1940s detective examining clues under a desk lamp",
+      "as head pastry chef in a spotless bakery kitchen",
+      "as lighthouse keeper in a lonely Atlantic lighthouse at dusk",
+      "as museum curator guarding a priceless masterpiece",
+      "as captain of a tiny sailing ship in a framed pirate portrait"
+    ]
+  },
+  "painters_cats": {
+    "name": "Painters' Cats",
+    "description": "each cat rendered as a classical art-historical portrait",
+    "style": "oil painting masterpiece, dramatic chiaroscuro lighting, 4:5 vertical portrait",
+    "negative": "photograph, real photo, cartoon, lowres, blurry, deformed, extra limbs, multiple cats, text, watermark",
+    "denoise": 0.55,
+    "shots": 5,
+    "cat": "both",
+    "scenes": [
+      "in the style of Rembrandt, dark dramatic studio portrait",
+      "in the style of Monet, soft impressionist garden light",
+      "in the style of Vermeer, candle-lit Dutch interior",
+      "in the style of Van Gogh, swirling starry sky background",
+      "in the style of a Renaissance court portrait with rich velvet drapery"
+    ]
+  },
+  "tiny_world": {
+    "name": "Tiny World",
+    "description": "the cats posed inside whimsical miniature dioramas",
+    "style": "shallow depth of field macro photography, tiny dollhouse scale, 4:5 vertical portrait",
+    "negative": "normal scale, human, lowres, blurry, out of focus, deformed, extra limbs, multiple cats, text, watermark",
+    "denoise": 0.5,
+    "shots": 5,
+    "cat": "both",
+    "scenes": [
+      "sitting inside an Airstream-shape cat house in a snowy diorama",
+      "peeking from a miniature Parisian apartment built in a terrarium",
+      "lounging on a giant chessboard under a desk lamp",
+      "taking a bath in a tiny bathtub in a dollhouse kitchen",
+      "asleep inside an open giant bookshelf diorama"
+    ]
+  },
+  "dreams_grumpy": {
+    "name": "Dreams of a Grumpy Cat",
+    "description": "surreal daydream scenes straight out of the cats' imaginations",
+    "style": "surreal dreamlike painting, soft ethereal light, 4:5 vertical portrait",
+    "negative": "photo, cartoon, lowres, blurry, deformed, extra limbs, multiple cats, text, watermark",
+    "denoise": 0.6,
+    "shots": 5,
+    "cat": "both",
+    "scenes": [
+      "dreaming of a world with no vacuum cleaners, floating in a sky of feather dusters turned into clouds",
+      "dreaming of an endless warm sunbeam that curves like a golden river",
+      "dreaming of a giant glass of milk the size of a swimming pool",
+      "dreaming of melting grandfather clocks and floating fish in a room without gravity",
+      "dreaming of being the king of a kingdom made entirely of cardboard boxes"
+    ]
+  }
+}
