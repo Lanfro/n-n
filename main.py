@@ -23,7 +23,8 @@ from src.database.db_manager import DBManager
 from src.engine.prompt_generator import PersonaStore, PromptGenerator
 from src.publisher.meta_publisher import MetaPublisher, MetaPublisherError
 from src.reel.brief import plan_set as run_reel_plan
-from src.reel.models import ReelBrief
+from src.reel.models import SESSION_AUTHENTICATED, ReelBrief
+from src.reel.producer import login_session as _reel_login_session
 from src.reel.producer import produce_set as _reel_produce_set
 from src.reel.validator import validate_clip as _validate_reel_clip
 from src.vault.media_host import build_media_host
@@ -1017,6 +1018,22 @@ def run_reel_produce(config: dict, set_key: str) -> int:
     return 1
 
 
+def run_reel_login(config: dict) -> int:
+    """Open the persistent browser for the operator's one-time sign-in.
+
+    Returns 0 once the session is authenticated, 3 when it is still
+    unauthenticated (timeout or the window was closed first).
+    """
+    state = _reel_login_session(config)
+    if state == SESSION_AUTHENTICATED:
+        return 0
+    logger.warning(
+        "Reel login not completed (%s); run --reel-login again to sign in.",
+        state,
+    )
+    return 3
+
+
 def _reel_out_dir(config: dict, set_key: str) -> Path:
     creative = config.get("creative", {})
     return Path(creative.get("out_root", "data/generated")) / set_key
@@ -1346,6 +1363,13 @@ def main(argv: list[str] | None = None) -> int:
         "for a set (--set) and download them under each brief's expected name",
     )
     parser.add_argument(
+        "--reel-login",
+        action="store_true",
+        help="Open the persistent browser so the operator can sign in to the "
+        "video service once; waits until the session is authenticated, then "
+        "exits (needed before --reel-produce)",
+    )
+    parser.add_argument(
         "--reel-validate",
         action="store_true",
         help="Validate a produced clip (--set + --brief) against the clip "
@@ -1379,6 +1403,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_drafts_vault(cfg, args.account)
     if args.resolve_chat:
         return run_resolve_chat(cfg, bot_token=args.vault_bot_token)
+    if args.reel_login:
+        return run_reel_login(cfg)
     if args.reel_plan:
         if not args.set_key:
             parser.error("--reel-plan requires --set")

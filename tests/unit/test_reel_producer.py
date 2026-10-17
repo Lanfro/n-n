@@ -3,8 +3,10 @@
 import json
 
 from src.reel.models import (
+    SESSION_AUTHENTICATED,
     SESSION_CHALLENGED,
     SESSION_LIMIT_REACHED,
+    SESSION_LOGGED_OUT,
     ReelBrief,
 )
 from src.reel.producer import (
@@ -59,6 +61,45 @@ class FakeDriver:
             raise ProducerError("simulated failure")
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(b"clip-bytes")
+
+
+class FakeLoginDriver:
+    """Replays scripted (session state, sign-in panel visible) observations."""
+
+    def __init__(self, observations, *, window_closed=False):
+        self.observations = [tuple(o) for o in observations]
+        self.page = _FakePage(closed=window_closed)
+        self.started = False
+        self.closed = False
+        self._current = (SESSION_LOGGED_OUT, True)
+
+    def start(self):
+        self.started = True
+
+    def close(self):
+        self.closed = True
+
+    def detect_state(self):
+        if len(self.observations) > 1:
+            self._current = self.observations.pop(0)
+        else:
+            self._current = self.observations[0]
+        return self._current[0]
+
+    def login_form_visible(self):
+        return self._current[1]
+
+
+class _FakePage:
+    def __init__(self, *, closed=False):
+        self.navigations: list[str] = []
+        self._closed = closed
+
+    def goto(self, url, wait_until=None):
+        self.navigations.append(url)
+
+    def is_closed(self):
+        return self._closed
 
 
 def _producer(driver, alerts):
@@ -163,3 +204,58 @@ def test_load_briefs_reads_files_in_shot_order(tmp_path):
     loaded = load_briefs(tmp_path)
     assert [b.shot_index for b in loaded] == [0, 1]
     assert loaded[0].brief_id == "s:0"
+
+
+def test_login_polls_until_authenticated():
+    driver = FakeLoginDriver(
+        [
+            (SESSION_LOGGED_OUT, True),
+            (SESSION_LOGGED_OUT, True),
+            (SESSION_AUTHENTICATED, False),
+        ]
+    )
+    state = _producer(driver, []).login(timeout_seconds=5, poll_seconds=0)
+
+    assert state == SESSION_AUTHENTICATED
+    assert driver.started and driver.closed
+    assert driver.page.navigations == ["https://example.invalid"]
+
+
+def test_login_accepts_a_cleared_sign_in_panel():
+    # Service markup drifts; the panel vanishing is enough proof of sign-in.
+    driver = FakeLoginDriver(
+        [
+            (SESSION_LOGGED_OUT, True),
+            (SESSION_LOGGED_OUT, False),
+            (SESSION_LOGGED_OUT, False),
+            (SESSION_LOGGED_OUT, False),
+        ]
+    )
+    state = _producer(driver, []).login(timeout_seconds=5, poll_seconds=0)
+
+    assert state == SESSION_AUTHENTICATED
+    assert driver.closed
+
+
+def test_login_does_not_assume_signed_in_before_the_panel_renders():
+    driver = FakeLoginDriver([(SESSION_LOGGED_OUT, False)])
+    state = _producer(driver, []).login(timeout_seconds=0, poll_seconds=0)
+
+    assert state == SESSION_LOGGED_OUT
+    assert driver.closed
+
+
+def test_login_times_out_while_logged_out():
+    driver = FakeLoginDriver([(SESSION_LOGGED_OUT, True)])
+    state = _producer(driver, []).login(timeout_seconds=0, poll_seconds=0)
+
+    assert state == SESSION_LOGGED_OUT
+    assert driver.closed
+
+
+def test_login_ends_when_window_is_closed():
+    driver = FakeLoginDriver([(SESSION_LOGGED_OUT, True)], window_closed=True)
+    state = _producer(driver, []).login(timeout_seconds=5, poll_seconds=0)
+
+    assert state == SESSION_LOGGED_OUT
+    assert driver.closed

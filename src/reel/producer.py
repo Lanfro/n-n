@@ -170,6 +170,10 @@ class PlaywrightDriver:
         # Unknown UI: treat as logged out so the batch pauses safely.
         return SESSION_LOGGED_OUT
 
+    def login_form_visible(self) -> bool:
+        """True while the service's sign-in panel is on screen."""
+        return self._first(self.selectors.get("login_form")) is not None
+
     def _guard(self) -> None:
         state = self.detect_state()
         if state in (SESSION_CHALLENGED, SESSION_LIMIT_REACHED, SESSION_LOGGED_OUT):
@@ -297,6 +301,86 @@ class ReelProducer:
         except OSError:
             return False
 
+    def login(
+        self, *, timeout_seconds: int = 300, poll_seconds: float = 2.0
+    ) -> str:
+        """Open the persistent browser for the operator's one-time sign-in.
+
+        Navigates to the service workspace and polls ``detect_state`` until the
+        session becomes authenticated (or the operator closes the window or the
+        timeout elapses). Credentials live in the persistent profile, so later
+        ``--reel-produce`` runs reuse the session.
+
+        Sign-in is confirmed either by a positive ``logged_in`` selector or,
+        because service markup drifts, by observing the sign-in panel appear
+        and then clear for several consecutive polls.
+
+        Returns the final session state (``authenticated`` on success).
+        """
+        driver = self._make_driver()
+        logger.info(
+            "Sign in to %s in the browser window; waiting up to %ss",
+            self.service_url,
+            timeout_seconds,
+        )
+        driver.start()
+        try:
+            driver.page.goto(
+                self.selectors.url("workspace", self.service_url),
+                wait_until="domcontentloaded",
+            )
+            deadline = time.monotonic() + timeout_seconds
+            seen_login = False
+            cleared_polls = 0
+            last_state = ""
+            while True:
+                page = getattr(driver, "page", None)
+                if page is not None and hasattr(page, "is_closed") and page.is_closed():
+                    logger.warning(
+                        "Browser window closed before login completed; "
+                        "session not saved"
+                    )
+                    return SESSION_LOGGED_OUT
+                state = driver.detect_state()
+                if state != last_state:
+                    logger.info("Session state while logging in: %s", state)
+                    last_state = state
+                if state == SESSION_AUTHENTICATED:
+                    logger.info(
+                        "Login confirmed for %s; session persisted for "
+                        "future --reel-produce runs",
+                        self.service_url,
+                    )
+                    return state
+                visible = (
+                    driver.login_form_visible()
+                    if hasattr(driver, "login_form_visible")
+                    else False
+                )
+                if visible:
+                    seen_login = True
+                    cleared_polls = 0
+                elif seen_login:
+                    # The panel we watched go away cannot be the still-logged-out
+                    # state, even if no logged_in selector matched.
+                    cleared_polls += 1
+                    if cleared_polls >= 3:
+                        logger.info(
+                            "Sign-in panel cleared; session persisted for "
+                            "future --reel-produce runs",
+                        )
+                        return SESSION_AUTHENTICATED
+                if time.monotonic() >= deadline:
+                    logger.warning(
+                        "Login not confirmed within %ss (last state: %s)",
+                        timeout_seconds,
+                        state,
+                    )
+                    return state
+                time.sleep(poll_seconds)
+        finally:
+            driver.close()
+
     def produce(
         self, briefs: list[ReelBrief], out_dir: str | Path
     ) -> ProduceResult:
@@ -409,3 +493,33 @@ def produce_set(
         f", PAUSED ({result.paused_state})" if result.paused else "",
     )
     return result
+
+
+def login_session(
+    config: dict,
+    *,
+    timeout_seconds: int = 300,
+    poll_seconds: float = 2.0,
+    driver_factory: Callable[[], Any] | None = None,
+) -> str:
+    """Open the persistent browser for the operator's one-time sign-in.
+
+    Loads the reel config, then returns the session state once the sign-in is
+    confirmed (``authenticated``), the window is closed (``logged_out``) or the
+    wait times out (last observed state).
+    """
+    reel_cfg = config.get("reel", {})
+    selectors = load_selectors(
+        reel_cfg.get("selectors_path", "config/reel/selectors.json")
+    )
+    producer = ReelProducer(
+        selectors=selectors,
+        profile_dir=reel_cfg.get("browser_profile_dir", "data/.browser/reel"),
+        service_url=reel_cfg.get("service_url", ""),
+        headless=bool(reel_cfg.get("headless", False)),
+        timeout_seconds=int(reel_cfg.get("generation_timeout_seconds", 600)),
+        driver_factory=driver_factory,
+    )
+    return producer.login(
+        timeout_seconds=timeout_seconds, poll_seconds=poll_seconds
+    )

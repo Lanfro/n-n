@@ -35,15 +35,18 @@ AI Video Reels (animate real vault photos → publish as Reels, approval-gated):
 # 1. Plan briefs for a creative set (network-free)
 uv run main.py --reel-plan --set parallel_lives
 
-# 2. Produce missing clips via the assisted browser session on a free
-#    external image-to-video service (needs `uv run playwright install chromium`
-#    and a one-time manual login)
+# 2. Sign in to the video service once (opens the persistent browser; the
+#    session is reused by every later --reel-produce run)
+uv run main.py --reel-login
+
+# 3. Produce missing clips via the assisted browser session on a free
+#    external image-to-video service (needs `uv run playwright install chromium`)
 uv run main.py --reel-produce --set parallel_lives
 
-# 3. Inspect a produced clip against the platform contract (needs ffmpeg/ffprobe)
+# 4. Inspect a produced clip against the platform contract (needs ffmpeg/ffprobe)
 uv run main.py --reel-validate --set parallel_lives --brief parallel_lives:0
 
-# 4. Validate, approval-gate and publish (--dry-run is hermetic)
+# 5. Validate, approval-gate and publish (--dry-run is hermetic)
 uv run main.py --reel-publish --set parallel_lives --brief parallel_lives:0 --dry-run
 ```
 

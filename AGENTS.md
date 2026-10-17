@@ -35,12 +35,13 @@ rules without being asked.
   URL source (that is R2/S3 via `src/vault/media_host.py`).
 - The static image "digital twin" generator is retired (`src/generator/` and
   `.venv-gen/` deleted). Reel production uses the `--reel-*` commands:
-  `--reel-plan --set <key>`, `--reel-produce --set <key>`,
+  `--reel-plan --set <key>`, `--reel-login`, `--reel-produce --set <key>`,
   `--reel-validate --set <key> --brief <id>`,
   `--reel-publish --set <key> --brief <id> [--dry-run]`.
 - Clip validation/repair needs `ffmpeg`/`ffprobe` on `PATH`; assisted
-  production needs `uv run playwright install chromium` and a one-time manual
-  login to the video service in the persistent profile.
+  production needs `uv run playwright install chromium` and a one-time sign-in
+  via `--reel-login` (the operator authenticates in the persistent profile
+  window, never via automation against Instagram).
 
 ## Environment notes (Windows / PowerShell)
 

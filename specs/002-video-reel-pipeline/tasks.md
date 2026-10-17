@@ -131,6 +131,11 @@ description: "Task list for AI Video Reel Pipeline"
 - [X] T035 Run the dry-run smoke test `uv run main.py --account cat_1 --media data/input_media/sample_cat.jpg --dry-run` and confirm exit 0
 - [X] T036 Execute the `specs/002-video-reel-pipeline/quickstart.md` validation scenarios and record results
 
+### Post-implementation (gap found during Scenario 4)
+
+- [X] T037 Add a `--reel-login` command so the operator can complete the one-time sign-in inside the persistent profile (browser previously closed on pause, leaving no way to authenticate): `login()`/`login_session()` in `src/reel/producer.py`, `run_reel_login` + CLI dispatch in `main.py`, exit 0 when authenticated / 3 otherwise
+- [X] T038 Repair `login_form` selectors against the live PixVerse DOM (all previous candidates returned 0; only `button:has-text('Login')` matches) and confirm session-state detection during a real browser run
+
 ---
 
 ## Dependencies & Execution Order

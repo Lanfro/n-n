@@ -141,6 +141,11 @@ Reels through the official Graph API, always behind the `APPROVED` gate.
                              caption/hook/hashtags). Network-free.
               │
               ▼
+[ --reel-login ]   one-time operator sign-in: opens the persistent browser at
+                   the service and waits until the sign-in panel clears (or a
+                   logged_in marker matches); cookies are reused afterwards.
+              │
+              ▼
 [ --reel-produce --set <key> ]  assisted Playwright session on a FREE external
                                 service (PixVerse) uploads each brief's source
                                 photo, applies the motion prompt, downloads the
@@ -163,6 +168,7 @@ Notes:
 - The browser step targets the external video service only; Instagram is never
   touched by automation (Constitution I).
 - Clip validation/repair requires `ffmpeg`/`ffprobe`; assisted production needs
-  `uv run playwright install chromium` and a one-time manual login.
+  `uv run playwright install chromium` and a one-time sign-in via
+  `uv run main.py --reel-login`.
 - The publish-time clip URL comes from R2/S3 (`src/vault/media_host.py`), never
   the vault.

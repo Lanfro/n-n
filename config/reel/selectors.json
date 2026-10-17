@@ -12,9 +12,13 @@
       "img[alt*='avatar' i]"
     ],
     "login_form": [
+      "text=Forgot your password?",
+      "text=Sign in with Google",
+      "text=By logging in you agree",
+      "text=Welcome to PixVerse",
+      "button:has-text('Login')",
       "input[type='email']",
-      "input[name='email']",
-      "button:has-text('Sign in')"
+      "input[name='email']"
     ],
     "upload_input": [
       "input[type='file']"
