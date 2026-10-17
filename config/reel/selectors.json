@@ -25,6 +25,7 @@
       "input[type='file']"
     ],
     "prompt_field": [
+      "textarea[placeholder*='Describe the content' i]",
       "textarea[placeholder*='prompt' i]",
       "[data-testid='prompt-input']",
       "textarea"

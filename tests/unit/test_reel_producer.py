@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from src.reel.models import (
     SESSION_AUTHENTICATED,
     SESSION_CHALLENGED,
@@ -259,3 +261,124 @@ def test_login_ends_when_window_is_closed():
 
     assert state == SESSION_LOGGED_OUT
     assert driver.closed
+
+
+class _FakeEl:
+    def __init__(self, visible=True):
+        self._visible = visible
+
+    def is_visible(self):
+        return self._visible
+
+
+class FakePageDOM:
+    """Answers ``query_selector(_all)``; a marker appears after N calls."""
+
+    def __init__(self, *, present_after=0, present=("#marker",), hidden=()):
+        self.calls = 0
+        self.present_after = present_after
+        self.present = set(present)
+        self.hidden = set(hidden)
+
+    def _maybe(self, sel):
+        self.calls += 1
+        if self.calls > self.present_after and sel in self.present:
+            return _FakeEl(visible=sel not in self.hidden)
+        return None
+
+    def query_selector(self, sel):
+        return self._maybe(sel)
+
+    def query_selector_all(self, sel):
+        el = self._maybe(sel)
+        return [el] if el is not None else []
+
+
+def _driver(page, *, selectors=None):
+    from src.reel.producer import PlaywrightDriver
+
+    drv = PlaywrightDriver(
+        selectors=selectors or ServiceSelectors(service="t"),
+        profile_dir="data/.browser/reel",
+        service_url="https://example.invalid",
+    )
+    drv.page = page
+    return drv
+
+
+def test_settle_returns_immediately_once_a_marker_renders():
+    page = FakePageDOM(present_after=0, present=("#any-marker",))
+    drv = _driver(
+        page,
+        selectors=ServiceSelectors(
+            service="t", selectors={"logged_in": ["#any-marker"], "login_form": []}
+        ),
+    )
+    drv._settle(timeout_seconds=5)
+    assert page.calls <= 2
+
+
+def test_settle_polls_until_the_marker_appears():
+    # Judging before hydration would read an empty DOM as "logged out".
+    page = FakePageDOM(present_after=3, present=("#marker",))
+    drv = _driver(
+        page,
+        selectors=ServiceSelectors(
+            service="t", selectors={"logged_in": ["#marker"], "login_form": []}
+        ),
+    )
+    drv._settle(timeout_seconds=10)
+    assert page.calls > 3
+
+
+def test_require_raises_a_clean_pause_when_the_element_never_appears():
+    from src.reel.producer import UNEXPECTED_UI
+
+    page = FakePageDOM(present_after=10**6, present=set())
+    drv = _driver(
+        page,
+        selectors=ServiceSelectors(
+            service="t", selectors={"upload_input": ["#gone"]}
+        ),
+    )
+    with pytest.raises(BrowserPaused) as exc:
+        drv._require("upload_input", "upload", timeout_seconds=0)
+    assert exc.value.state == UNEXPECTED_UI
+
+
+def test_require_waits_for_a_late_element():
+    page = FakePageDOM(present_after=2, present=("#upload",))
+    drv = _driver(
+        page,
+        selectors=ServiceSelectors(
+            service="t", selectors={"upload_input": ["#upload"]}
+        ),
+    )
+    el = drv._require("upload_input", "upload", timeout_seconds=10)
+    assert el is not None
+
+
+def test_require_skips_a_hidden_look_alike():
+    # PixVerse keeps an off-screen prompt textarea that must never be used.
+    page = FakePageDOM(present={"#hidden", "#real"}, hidden={"#hidden"})
+    drv = _driver(
+        page,
+        selectors=ServiceSelectors(
+            service="t", selectors={"prompt_field": ["#hidden", "#real"]}
+        ),
+    )
+    el = drv._require("prompt_field", "prompt", timeout_seconds=1)
+    assert el is not None and el.is_visible()
+
+
+def test_require_can_explicitly_accept_hidden_inputs():
+    # File inputs are legitimately hidden.
+    page = FakePageDOM(present={"input[type=file]"}, hidden={"input[type=file]"})
+    drv = _driver(
+        page,
+        selectors=ServiceSelectors(
+            service="t", selectors={"upload_input": ["input[type=file]"]}
+        ),
+    )
+    el = drv._require("upload_input", "upload", require_visible=False, timeout_seconds=1)
+    assert el is not None

@@ -181,14 +181,74 @@ class PlaywrightDriver:
 
     # -- per-clip flow ---------------------------------------------------
 
-    def _require(self, key: str, step: str) -> Any:
-        el = self._first(self.selectors.get(key))
-        if el is None:
-            url = self.selectors.url("workspace", self.service_url)
-            raise BrowserPaused(
-                UNEXPECTED_UI, f"'{key}' not found at {step} on {url}"
+    def _settle(self, *, timeout_seconds: float = 20.0) -> None:
+        """Let the SPA hydrate before judging the session.
+
+        Right after ``domcontentloaded`` the app has usually not rendered its
+        header yet, so an immediate ``detect_state()`` sees neither a session
+        marker nor the sign-in panel and falls through to "logged out", which
+        would pause a perfectly good session. Poll until *some* marker exists.
+        """
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if (
+                self._first(self.selectors.get("logged_in")) is not None
+                or self._first(self.selectors.get("login_form")) is not None
+            ):
+                return
+            time.sleep(0.5)
+        logger.debug(
+            "No session marker rendered within %.0fs; judging as-is",
+            timeout_seconds,
+        )
+
+    def _first_visible(self, key: str) -> Any:
+        """First *visible* candidate for a key, else ``None``.
+
+        A hidden look-alike must never be chosen for an interaction (PixVerse
+        keeps an off-screen prompt textarea, for example).
+        """
+        for sel in self.selectors.get(key):
+            try:
+                elements = self.page.query_selector_all(sel)
+            except Exception:  # noqa: BLE001 - page churn during queries
+                elements = []
+            for el in elements:
+                if self._is_visible(el):
+                    return el
+        return None
+
+    @staticmethod
+    def _is_visible(el: Any) -> bool:
+        try:
+            return bool(el.is_visible())
+        except Exception:  # noqa: BLE001 - detached handle
+            return False
+
+    def _require(
+        self,
+        key: str,
+        step: str,
+        *,
+        require_visible: bool = True,
+        timeout_seconds: float = 15.0,
+    ) -> Any:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            el = (
+                self._first_visible(key)
+                if require_visible
+                else self._first(self.selectors.get(key))
             )
-        return el
+            if el is not None:
+                return el
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.5)
+        url = self.selectors.url("workspace", self.service_url)
+        raise BrowserPaused(
+            UNEXPECTED_UI, f"'{key}' not found at {step} on {url}"
+        )
 
     def generate_clip(
         self, brief: ReelBrief, dest: str | Path, *, timeout_seconds: int | None = None
@@ -198,37 +258,58 @@ class PlaywrightDriver:
             self.selectors.url("workspace", self.service_url),
             wait_until="domcontentloaded",
         )
+        self._settle()
         self._guard()
 
-        upload = self._require("upload_input", "upload")
-        upload.set_input_files(brief.source_photo_path)
+        try:
+            upload = self._require("upload_input", "upload", require_visible=False)
+            upload.set_input_files(brief.source_photo_path)
 
-        prompt = self._require("prompt_field", "prompt")
-        prompt.fill(brief.motion_prompt)
+            prompt = self._require("prompt_field", "prompt")
+            prompt.fill(brief.motion_prompt)
 
-        aspect = self._first(self.selectors.get("aspect_9_16"))
-        if aspect is not None:
-            aspect.click()
+            aspect = self._first_visible("aspect_9_16")
+            if aspect is not None:
+                try:
+                    aspect.click()
+                except Exception:  # noqa: BLE001 - optional control
+                    logger.debug("Aspect control not clickable; keeping default")
 
-        duration = self._first(self.selectors.get("duration_control"))
-        if duration is not None:
-            try:
-                duration.select_option(str(brief.duration_seconds))
-            except Exception:  # noqa: BLE001 - control may not be a <select>
-                logger.debug("Duration control is not selectable; skipping")
+            duration = self._first_visible("duration_control")
+            if duration is not None:
+                try:
+                    duration.select_option(str(brief.duration_seconds))
+                except Exception:  # noqa: BLE001 - control may not be a <select>
+                    logger.debug("Duration control is not selectable; skipping")
 
-        generate = self._require("generate_button", "generate")
-        generate.click()
+            baseline_videos = len(self.page.query_selector_all("video"))
+            generate = self._require("generate_button", "generate")
+            generate.click()
 
-        self._wait_for_result(timeout)
-        self._download_result(Path(dest))
+            self._wait_for_result(timeout, baseline_videos=baseline_videos)
+            self._download_result(Path(dest))
+        except (BrowserPaused, ProducerError):
+            raise
+        except Exception as exc:  # page/selector faults must pause, not crash
+            raise BrowserPaused(
+                UNEXPECTED_UI,
+                f"browser interaction failed: {str(exc)[:300]}",
+            ) from exc
 
-    def _wait_for_result(self, timeout: int) -> None:
+    def _video_count(self) -> int:
+        """Number of ``<video>`` elements; the create page has a standby preview."""
+        try:
+            return len(self.page.query_selector_all("video"))
+        except Exception:  # noqa: BLE001 - page churn during polling
+            return 0
+
+    def _wait_for_result(self, timeout: int, *, baseline_videos: int = 0) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             self._guard()
-            result = self._first(self.selectors.get("result_video"))
-            if result is not None:
+            if self._first_visible("download_button") is not None:
+                return
+            if self._video_count() > baseline_videos:
                 return
             time.sleep(2)
         raise ProducerError(
@@ -237,14 +318,14 @@ class PlaywrightDriver:
 
     def _download_result(self, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        button = self._first(self.selectors.get("download_button"))
+        button = self._first_visible("download_button")
         if button is not None:
             with self.page.expect_download(timeout=self.timeout * 1000) as info:
                 button.click()
             info.value.save_as(str(dest))
             return
 
-        video = self._first(self.selectors.get("result_video"))
+        video = self._first_visible("result_video")
         src = None
         if video is not None:
             src = video.get_attribute("src")
