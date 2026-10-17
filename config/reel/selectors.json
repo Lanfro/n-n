@@ -50,8 +50,8 @@
     ],
     "download_button": [
       "a[download]",
-      "button:has-text('Download')",
-      "[data-testid='download-button']"
+      "[data-testid='download-button']",
+      "[data-testid*='download' i]"
     ]
   },
   "markers": {

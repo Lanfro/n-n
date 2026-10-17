@@ -38,6 +38,46 @@ logger = logging.getLogger(__name__)
 
 UNEXPECTED_UI = "unexpected_ui"
 
+# JS: centre of the smallest visible element whose text exactly equals `arg[0]`,
+# inside the [arg[1], arg[2]] vertical band (used to pick a popover option).
+_CLICK_TEXT_JS = r"""
+([text, ymin, ymax]) => {
+  const vis = (el) => { const r = el.getBoundingClientRect();
+    const st = window.getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden'
+      && st.display !== 'none'; };
+  const cands = [];
+  for (const el of document.querySelectorAll('div, span, button, p, label')) {
+    if (!vis(el)) continue;
+    if ((el.innerText || '').trim() !== text) continue;
+    const r = el.getBoundingClientRect();
+    if (r.y < ymin || r.y > ymax) continue;
+    cands.push([r.width * r.height, r.x + r.width / 2, r.y + r.height / 2]);
+  }
+  cands.sort((a, b) => a[0] - b[0]);
+  return cands.length ? [cands[0][1], cands[0][2]] : null;
+}
+"""
+
+# JS: centre of the resolution token ("540P") that opens the settings popover.
+_OPEN_SETTINGS_JS = r"""
+() => {
+  const vis = (el) => { const r = el.getBoundingClientRect();
+    const st = window.getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden'
+      && st.display !== 'none'; };
+  const re = /^\d{3,4}P$/;
+  for (const el of document.querySelectorAll('div, span, button')) {
+    if (!vis(el)) continue;
+    if (!re.test((el.innerText || '').trim())) continue;
+    if (el.getBoundingClientRect().y < window.innerHeight * 0.7) continue;
+    const r = el.getBoundingClientRect();
+    return [r.x + r.width / 2, r.y + r.height / 2];
+  }
+  return null;
+}
+"""
+
 
 class ProducerError(RuntimeError):
     pass
@@ -115,12 +155,14 @@ class PlaywrightDriver:
         service_url: str,
         headless: bool = False,
         timeout_seconds: int = 600,
+        settings: dict | None = None,
     ):
         self.selectors = selectors
         self.profile_dir = Path(profile_dir)
         self.service_url = service_url
         self.headless = headless
         self.timeout = timeout_seconds
+        self.settings = dict(settings or {})
         self._pw: Any = None
         self._context: Any = None
         self.page: Any = None
@@ -250,6 +292,57 @@ class PlaywrightDriver:
             UNEXPECTED_UI, f"'{key}' not found at {step} on {url}"
         )
 
+    # -- create-settings popover ----------------------------------------
+
+    @staticmethod
+    def _setting_options(settings: dict | None) -> list[str]:
+        """Popover option labels to pick, in order (empty when unset)."""
+        cfg = settings or {}
+        res = str(cfg.get("resolution") or "").strip()
+        aspect = str(cfg.get("aspect") or "").strip()
+        dur = str(cfg.get("duration") or "").strip()
+        if dur.isdigit():
+            dur = f"{dur}s"
+        return [value for value in (res, aspect, dur) if value]
+
+    def _click_exact_text(
+        self, text: str, *, ymin: float = 0, ymax: float = 100000
+    ) -> bool:
+        box = self.page.evaluate(_CLICK_TEXT_JS, [text, ymin, ymax])
+        if not box:
+            return False
+        self.page.mouse.click(box[0], box[1])
+        return True
+
+    def _open_settings_popover(self) -> bool:
+        box = self.page.evaluate(_OPEN_SETTINGS_JS)
+        if not box:
+            return False
+        self.page.mouse.click(box[0], box[1])
+        return True
+
+    def _apply_settings(self) -> None:
+        """Pick resolution/aspect/duration in the create-settings popover.
+
+        Best effort: when the popover cannot be found the service defaults are
+        kept (the validator still rejects any clip that misses the bounds).
+        """
+        options = self._setting_options(self.settings)
+        if not options:
+            return
+        if not self._open_settings_popover():
+            logger.debug("Settings popover not found; keeping service defaults")
+            return
+        time.sleep(1.0)
+        for value in options:
+            if not self._click_exact_text(value, ymin=120):
+                logger.debug("Setting option %r not found in popover", value)
+            time.sleep(0.5)
+        try:
+            self.page.keyboard.press("Escape")
+        except Exception as exc:  # noqa: BLE001 - closing is best effort
+            logger.debug("Could not close settings popover: %s", exc)
+
     def generate_clip(
         self, brief: ReelBrief, dest: str | Path, *, timeout_seconds: int | None = None
     ) -> None:
@@ -268,21 +361,9 @@ class PlaywrightDriver:
             prompt = self._require("prompt_field", "prompt")
             prompt.fill(brief.motion_prompt)
 
-            aspect = self._first_visible("aspect_9_16")
-            if aspect is not None:
-                try:
-                    aspect.click()
-                except Exception:  # noqa: BLE001 - optional control
-                    logger.debug("Aspect control not clickable; keeping default")
+            self._apply_settings()
 
-            duration = self._first_visible("duration_control")
-            if duration is not None:
-                try:
-                    duration.select_option(str(brief.duration_seconds))
-                except Exception:  # noqa: BLE001 - control may not be a <select>
-                    logger.debug("Duration control is not selectable; skipping")
-
-            baseline_videos = len(self.page.query_selector_all("video"))
+            baseline_videos = self._video_count()
             generate = self._require("generate_button", "generate")
             generate.click()
 
@@ -355,6 +436,7 @@ class ReelProducer:
         timeout_seconds: int = 600,
         alerter: Callable[[str], None] | None = None,
         driver_factory: Callable[[], Any] | None = None,
+        settings: dict | None = None,
     ):
         self.selectors = selectors
         self.profile_dir = profile_dir
@@ -363,6 +445,7 @@ class ReelProducer:
         self.timeout = timeout_seconds
         self.alerter = alerter or (lambda _msg: None)
         self.driver_factory = driver_factory
+        self.settings = dict(settings or {})
 
     def _make_driver(self) -> Any:
         if self.driver_factory is not None:
@@ -373,6 +456,7 @@ class ReelProducer:
             service_url=self.service_url,
             headless=self.headless,
             timeout_seconds=self.timeout,
+            settings=self.settings,
         )
 
     @staticmethod
@@ -514,10 +598,21 @@ class ReelProducer:
         return result
 
     def _pause(self, brief: ReelBrief, exc: BrowserPaused) -> None:
+        if exc.state == SESSION_LIMIT_REACHED:
+            action = (
+                "The service refused the generation (e.g. 'Insufficient "
+                "Credits'). Earn credits, subscribe, or drop the clip in by "
+                "hand, then re-run."
+            )
+        elif exc.state == SESSION_CHALLENGED:
+            action = "Solve the anti-bot check in the browser, then re-run."
+        else:
+            action = (
+                "Complete this clip by hand (or re-authenticate) and re-run."
+            )
         message = (
             f"Reel production paused at '{exc.state}' for brief "
-            f"{brief.brief_id}: {exc.reason}. "
-            "Complete this clip by hand (or re-authenticate) and re-run."
+            f"{brief.brief_id}: {exc.reason}. {action}"
         )
         logger.warning(message)
         try:
@@ -549,6 +644,11 @@ def produce_set(
     selectors = load_selectors(
         reel_cfg.get("selectors_path", "config/reel/selectors.json")
     )
+    settings = {
+        "resolution": reel_cfg.get("resolution", ""),
+        "aspect": reel_cfg.get("aspect", ""),
+        "duration": reel_cfg.get("duration_seconds", ""),
+    }
     producer = ReelProducer(
         selectors=selectors,
         profile_dir=reel_cfg.get("browser_profile_dir", "data/.browser/reel"),
@@ -557,6 +657,7 @@ def produce_set(
         timeout_seconds=int(reel_cfg.get("generation_timeout_seconds", 600)),
         alerter=alerter or build_alerter(config),
         driver_factory=driver_factory,
+        settings=settings,
     )
     logger.info(
         "Producing %d brief(s) for set '%s' via %s",

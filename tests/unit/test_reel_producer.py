@@ -382,3 +382,86 @@ def test_require_can_explicitly_accept_hidden_inputs():
     )
     el = drv._require("upload_input", "upload", require_visible=False, timeout_seconds=1)
     assert el is not None
+
+
+class _SettingsPage:
+    """Records clicks/keys and answers the settings-popover JS probes."""
+
+    def __init__(self, *, found=("540P", "9:16", "3s")):
+        self.found = set(found)
+        self.evaluated: list[object] = []
+        self.clicks: list[tuple[float, float]] = []
+        self.keys: list[str] = []
+        self.mouse = self
+        self.keyboard = self
+
+    def evaluate(self, js, arg=None):
+        self.evaluated.append(arg)
+        if arg is None:  # _OPEN_SETTINGS_JS
+            return [1.0, 2.0]
+        return [10.0, 20.0] if arg[0] in self.found else None
+
+    def click(self, x, y):
+        self.clicks.append((x, y))
+
+    def press(self, key):
+        self.keys.append(key)
+
+
+def test_setting_options_formats_duration_and_drops_blanks():
+    from src.reel.producer import PlaywrightDriver
+
+    assert PlaywrightDriver._setting_options(
+        {"resolution": "540P", "aspect": "9:16", "duration": 3}
+    ) == ["540P", "9:16", "3s"]
+    assert PlaywrightDriver._setting_options({"resolution": "", "duration": ""}) == []
+    assert PlaywrightDriver._setting_options(None) == []
+
+
+def test_apply_settings_is_a_noop_without_configuration():
+    page = _SettingsPage()
+    drv = _driver(page)
+    drv.settings = {}
+    drv._apply_settings()
+    assert page.evaluated == [] and page.clicks == [] and page.keys == []
+
+
+def test_apply_settings_opens_popover_and_picks_each_option():
+    page = _SettingsPage()
+    drv = _driver(page)
+    drv.settings = {"resolution": "540P", "aspect": "9:16", "duration": 3}
+    drv._apply_settings()
+    assert page.evaluated[0] is None  # popover open probe
+    assert len(page.clicks) == 4  # open + one per option
+    assert page.keys == ["Escape"]
+
+
+def test_apply_settings_keeps_defaults_when_popover_is_absent():
+    page = _SettingsPage()
+    page.evaluate = lambda js, arg=None: None
+    drv = _driver(page)
+    drv.settings = {"resolution": "540P"}
+    drv._apply_settings()
+    assert page.clicks == []
+
+
+def _paywall_driver():
+    page = FakePageDOM(present={"text=insufficient credits"})
+    return _driver(
+        page,
+        selectors=ServiceSelectors(
+            service="t",
+            selectors={"logged_in": [], "login_form": []},
+            markers={"limit": ["text=insufficient credits"]},
+        ),
+    )
+
+
+def test_detect_state_reports_limit_reached_on_the_paywall_marker():
+    assert _paywall_driver().detect_state() == SESSION_LIMIT_REACHED
+
+
+def test_guard_pauses_the_batch_when_credits_are_insufficient():
+    with pytest.raises(BrowserPaused) as exc:
+        _paywall_driver()._guard()
+    assert exc.value.state == SESSION_LIMIT_REACHED

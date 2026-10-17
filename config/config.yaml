@@ -95,6 +95,11 @@ reel:
   # Bounded wait for a single clip generation (seconds)
   generation_timeout_seconds: 600
   aspect: "9:16"
+  # Create-page settings applied via the service's settings popover.
+  # 540P is the cheapest resolution that still meets min_resolution; the free
+  # tier's daily credits make 3s the affordable clip length.
+  resolution: "540P"
+  duration_seconds: 3
   min_resolution: [540, 960]
   target_resolution: [1080, 1920]
   min_duration_seconds: 3
