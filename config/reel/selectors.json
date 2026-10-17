@@ -7,9 +7,10 @@
   },
   "selectors": {
     "logged_in": [
-      "[data-testid='user-avatar']",
+      "img[alt='Personal']",
+      "img[src*='profile-picture' i]",
       "button:has-text('Log out')",
-      "img[alt*='avatar' i]"
+      "[data-testid='user-avatar']"
     ],
     "login_form": [
       "text=Forgot your password?",
