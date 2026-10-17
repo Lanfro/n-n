@@ -122,14 +122,14 @@ description: "Task list for AI Video Reel Pipeline"
 
 **Purpose**: Retire the old path, keep docs/gates green.
 
-- [ ] T029 Remove the static SD path: delete `src/generator/` and `.venv-gen/`, drop `--generate-set`/`--set-shots` from `main.py`, and remove the `creative.gen_env_python`/`generator_script`/`model`/`steps`/`mode`/`cfg` keys from `config/config.yaml`
-- [ ] T030 [P] Relocate any still-needed anchor helper (e.g. `last_10_anchors`, `prep_square`) out of `src/generator/` into `src/reel/` before deletion
-- [ ] T031 [P] Update `CONTEXT.md` / `AGENTS.md` / `README` references to the retired static generator and the new `--reel-*` commands
-- [ ] T032 [P] Add regression test asserting the photo pipeline still reaches `PUBLISHED` under `--dry-run` in `tests/integration/test_photo_pipeline_smoke.py`
-- [ ] T033 Run `uv run ruff check` and fix all lint issues
-- [ ] T034 Run `uv run pytest` and make the suite green
-- [ ] T035 Run the dry-run smoke test `uv run main.py --account cat_1 --media data/input_media/sample_cat.jpg --dry-run` and confirm exit 0
-- [ ] T036 Execute the `specs/002-video-reel-pipeline/quickstart.md` validation scenarios and record results
+- [X] T029 Remove the static SD path: delete `src/generator/` and `.venv-gen/`, drop `--generate-set`/`--set-shots` from `main.py`, and remove the `creative.gen_env_python`/`generator_script`/`model`/`steps`/`mode`/`cfg` keys from `config/config.yaml`
+- [X] T030 [P] Relocate any still-needed anchor helper (e.g. `last_10_anchors`, `prep_square`) out of `src/generator/` into `src/reel/` before deletion
+- [X] T031 [P] Update `CONTEXT.md` / `AGENTS.md` / `README` references to the retired static generator and the new `--reel-*` commands
+- [X] T032 [P] Add regression test asserting the photo pipeline still reaches `PUBLISHED` under `--dry-run` in `tests/integration/test_photo_pipeline_smoke.py`
+- [X] T033 Run `uv run ruff check` and fix all lint issues
+- [X] T034 Run `uv run pytest` and make the suite green
+- [X] T035 Run the dry-run smoke test `uv run main.py --account cat_1 --media data/input_media/sample_cat.jpg --dry-run` and confirm exit 0
+- [X] T036 Execute the `specs/002-video-reel-pipeline/quickstart.md` validation scenarios and record results
 
 ---
 

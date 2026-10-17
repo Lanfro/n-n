@@ -35,6 +35,12 @@ cat-agent-instagram/
 │   │   └── visual_analyzer.py  # Local vision model integration (Ollama Qwen2-VL)
 │   ├── engine/
 │   │   └── prompt_generator.py # Persona-driven prompt engineering & LLM generation
+│   ├── reel/                   # AI Video Reel pipeline (briefs, assisted production, validation)
+│   │   ├── brief.py            # Creative set + vault anchors -> self-contained reel briefs
+│   │   ├── anchors.py          # "keep the last 10" vault anchor pools
+│   │   ├── producer.py         # Playwright-driven external image-to-video service (never IG)
+│   │   ├── validator.py        # ffprobe validation + allowed ffmpeg repairs
+│   │   └── models.py           # ReelBrief / ClipReport / BrowserSessionState
 │   ├── approval/
 │   │   ├── telegram_gateway.py # Telegram bot for human approval (/approve, /retry)
 │   │   ├── sound.py            # HITL alert beep (winsound system or custom .wav)
@@ -122,3 +128,41 @@ cat-agent-instagram/
 [ Archive ] -> each vault asset is uploaded to the private vault channel
    as a Document with a sha256 caption (best-effort unless required).
 ```
+
+## 7. AI Video Reel Pipeline (`--reel-*`)
+
+The retired static image "digital twin" generator is replaced by a video path
+that animates **real vault cat photos** into 9:16 clips and publishes them as
+Reels through the official Graph API, always behind the `APPROVED` gate.
+
+```text
+[ --reel-plan --set <key> ]  scene_writer shot plan -> reel_brief_NN.json per
+                             shot + manifest.json (source photo, motion prompt,
+                             caption/hook/hashtags). Network-free.
+              │
+              ▼
+[ --reel-produce --set <key> ]  assisted Playwright session on a FREE external
+                                service (PixVerse) uploads each brief's source
+                                photo, applies the motion prompt, downloads the
+                                clip as expected_output. Skips clips already
+                                present; pauses + alerts on challenge/limit.
+              │
+              ▼
+[ --reel-validate --set <key> --brief <id> ]  ffprobe report; repairs (silent
+                                              AAC mux, min-res upscale) only.
+              │
+              ▼
+[ --reel-publish --set <key> --brief <id> [--dry-run] ]
+   validate -> AWAITING_APPROVAL (Telegram video preview) -> APPROVED ->
+   host clip on R2/S3 -> Reel container (media_type=REELS) -> poll FINISHED ->
+   media_publish -> PUBLISHED. Deduplicated by brief id; captions carry the
+   mandatory AI-generated disclosure (FR-016).
+```
+
+Notes:
+- The browser step targets the external video service only; Instagram is never
+  touched by automation (Constitution I).
+- Clip validation/repair requires `ffmpeg`/`ffprobe`; assisted production needs
+  `uv run playwright install chromium` and a one-time manual login.
+- The publish-time clip URL comes from R2/S3 (`src/vault/media_host.py`), never
+  the vault.

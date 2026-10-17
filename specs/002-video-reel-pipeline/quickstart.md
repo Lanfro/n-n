@@ -144,3 +144,18 @@ clips, Reels publisher with mocked HTTP, browser producer with mocked Playwright
 - Browser producer contract: [contracts/video-service-browser.md](contracts/video-service-browser.md)
 - Clip requirements: [contracts/reel-clip-requirements.md](contracts/reel-clip-requirements.md)
 - Publishing contract: [contracts/meta-graph-api-reels.md](contracts/meta-graph-api-reels.md)
+
+## Validation results (local run)
+
+| # | Scenario | Result | Notes |
+|---|---|---|---|
+| 1 | Plan briefs (`--reel-plan --set parallel_lives`) | Pass | 5 briefs + manifest written; no network. Plan call ~3 min (local LLM). |
+| 2 | Validate a clip (`--reel-validate`) | Partial | Missing-clip path returns 2 as designed. Full probe blocked: `ffprobe`/`ffmpeg` not installed on this machine (validator fails safe → `rejected`). |
+| 3 | Dry-run Reel publish | Pass (via test) | Covered by `tests/unit/test_reel_publish_flow.py` (validator stubbed); reaches `PUBLISHED` with synthetic ids, no network/browser. |
+| 4 | Assisted production (`--reel-produce`) | Not run | Needs `playwright install chromium` + one-time manual service login. |
+| 5 | Live Reel publish | Not run | Needs `config.local.yaml` credentials + R2 host + `meta.dry_run: false`. |
+| 6 | Retry / no duplicate | Pass (via test) | `test_reel_publish_flow.py::test_retry_reuses_failed_post` and `::test_second_publish_is_deduplicated`. |
+| 7 | Static generation retired | Pass | `--generate-set` → argparse "unrecognized arguments" (exit 2); `src/generator/`, `.venv-gen/` removed; config keys gone. |
+| 8 | Regression: photo pipeline | Pass | `uv run main.py --account cat_1 --media data/input_media/sample_cat.jpg --dry-run` → exit 0, `PUBLISHED`. |
+| 9 | Lint + tests | Pass | `ruff check` clean; `pytest` 137 passed. |
+

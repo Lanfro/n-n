@@ -22,6 +22,7 @@ from pathlib import Path
 
 from ..engine.prompt_generator import PersonaStore, PromptGenerator
 from ..engine.scene_writer import SceneWriter, load_sets
+from .anchors import last_10_anchors
 from .models import ReelBrief
 
 logger = logging.getLogger(__name__)
@@ -209,8 +210,6 @@ def plan_set(
     if own_conn:
         conn = sqlite3.connect(pipeline_cfg.get("db_path", "data/pipeline.db"))
     try:
-        from ..generator.anchors import last_10_anchors
-
         pools = last_10_anchors(conn)
     finally:
         if own_conn:

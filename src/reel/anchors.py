@@ -1,9 +1,13 @@
-"""Twin anchor pools: the "keep the last 10" rule.
+"""Anchor pools for Reel briefs: the "keep the last 10" rule.
 
-For each cat (label), select the 10 most recent solo-labeled vault photos
-as img2img identity anchors. If a cat has fewer than 10 solo photos, top up
-from recent 'both'-labeled photos. Rolling window: recomputed at call time
-by descending ingest id, so new photos slide the pool automatically.
+For each cat (label), select the 10 most recent solo-labeled vault photos as
+identity anchors for the Reel briefs. If a cat has fewer than 10 solo photos,
+top up from recent 'both'-labeled photos. The rolling window is recomputed at
+call time by descending ingest id, so new photos slide the pool automatically.
+
+Relocated from the retired static generator (`src/generator/anchors.py`); the
+SD-specific `prep_square` helper (PIL-only) was dropped with the rest of that
+path.
 """
 
 from __future__ import annotations
@@ -11,10 +15,7 @@ from __future__ import annotations
 import os
 import sqlite3
 
-from PIL import Image
-
 ANCHOR_SIZE = 10
-SQUARE_PX = 512
 
 
 def _select_ordered(db: sqlite3.Connection, label: str, limit: int) -> list[tuple]:
@@ -58,24 +59,8 @@ def select_anchor_pool(
 
 
 def last_10_anchors(db: sqlite3.Connection) -> dict[str, list[dict]]:
+    """Return {label: anchor pool} for the two cat labels."""
     return {
         label: select_anchor_pool(db, label)
         for label in ("nero", "nuvola")
     }
-
-
-def prep_square(path: str, px: int = SQUARE_PX) -> Image.Image:
-    """Center-crop to a square and resize to `px` (SD1.5 expects 512)."""
-    img = Image.open(path).convert("RGB")
-    w, h = img.size
-    side = min(w, h)
-    left = (w - side) // 2
-    top = (h - side) // 2
-    return img.crop((left, top, left + side, top + side)).resize(
-        (px, px), Image.LANCZOS
-    )
-
-
-def anchor_for_shot(pool: list[dict], shot_index: int) -> dict:
-    """Deterministic round-robin anchor selection across a shot list."""
-    return pool[shot_index % len(pool)]

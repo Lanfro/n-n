@@ -78,15 +78,6 @@ pipeline:
 creative:
   sets_path: "config/creative/sets.json"
   out_root: "data/generated"
-  # Python 3.12 venv that hosts the torch/diffusers stack (see
-  # src/generator/requirements-gen.txt). The main env stays on 3.14.
-  gen_env_python: ".venv-gen/Scripts/python.exe"
-  generator_script: "src/generator/run_generate.py"
-  model: "Lykon/dreamshaper-8"
-  steps: 24
-  # Default render recipe (per-set values in sets.json override these)
-  mode: "text2img"
-  cfg: 8.0
 
 # AI Video Reel pipeline: animate real vault cat photos into 9:16 clips via an
 # assisted browser session on a free third-party service, then publish as Reels

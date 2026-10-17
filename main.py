@@ -11,22 +11,16 @@ Usage:
 import argparse
 import json
 import logging
-import os
 import re
-import sqlite3
-import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-import requests
 import yaml
 
 from src.approval.telegram_gateway import TelegramGateway
 from src.database.db_manager import DBManager
 from src.engine.prompt_generator import PersonaStore, PromptGenerator
-from src.engine.scene_writer import SceneWriter, load_sets
-from src.generator.anchors import anchor_for_shot, last_10_anchors
 from src.publisher.meta_publisher import MetaPublisher, MetaPublisherError
 from src.reel.brief import plan_set as run_reel_plan
 from src.reel.models import ReelBrief
@@ -1004,215 +998,6 @@ def run_retry(config: dict, post_id: int, *, dry_run: bool = True) -> int:
         db.close()
 
 
-def _unload_ollama(config: dict) -> None:
-    """Ask Ollama to unload text + vision models to free RAM for generation."""
-    ollama_cfg = config.get("ollama", {})
-    base = ollama_cfg.get("base_url", "http://localhost:11434").rstrip("/")
-    for model in (
-        ollama_cfg.get("text_model", "qwen2.5"),
-        ollama_cfg.get("vision_model", "qwen3-vl:8b"),
-    ):
-        try:
-            requests.post(
-                f"{base}/api/generate",
-                json={"model": model, "keep_alive": 0},
-                timeout=30,
-            )
-        except requests.exceptions.RequestException:
-            pass
-
-
-def run_generate_set(config: dict, set_key: str, *, shots: int | None = None) -> int:
-    """Generate a creative set of "digital twin" images.
-
-    Writes the shot plan via the local text model, renders one img2img per
-    shot anchored on the cat's last-10 vault photos, unloads Ollama before
-    rendering (8 GB RAM cannot hold both stacks), and writes a digest +
-    manifest under data/generated/.
-    """
-    creative = config.get("creative", {})
-    ollama_cfg = config.get("ollama", {})
-    pipeline_cfg = config.get("pipeline", {})
-    persona_cfg = config.get("personas", {})
-
-    sets = load_sets(creative.get("sets_path", "config/creative/sets.json"))
-    if set_key not in sets:
-        logger.error(
-            "Unknown creative set '%s'. Available: %s",
-            set_key,
-            ", ".join(sorted(sets)),
-        )
-        return 2
-    set_cfg = sets[set_key]
-    out_root = Path(creative.get("out_root", "data/generated"))
-    out_dir = out_root / set_key
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    personas = PersonaStore(
-        persona_cfg.get("config_path", "config/personas.json")
-    ).accounts()
-    writer = SceneWriter(
-        base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
-        model=ollama_cfg.get("text_model", "qwen2.5"),
-        timeout_seconds=ollama_cfg.get("timeout_seconds", 120),
-        num_predict=ollama_cfg.get("num_predict"),
-    )
-    logger.info(
-        "Writing shot plan for '%s' (%s)",
-        set_key,
-        set_cfg.get("name", set_key),
-    )
-    plan = writer.write_plan(set_key, set_cfg, personas, shots=shots)
-    with open(out_dir / "shots.json", "w", encoding="utf-8") as fh:
-        json.dump({"set": set_key, "shots": plan}, fh, indent=2, ensure_ascii=False)
-    logger.info("Shot plan: %d shots -> %s", len(plan), out_dir / "shots.json")
-
-    # Load anchor pools (read-only sqlite access; not via DBManager)
-    conn = sqlite3.connect(
-        pipeline_cfg.get("db_path", "data/pipeline.db")
-    )
-    try:
-        pools = last_10_anchors(conn)
-    finally:
-        conn.close()
-
-    gen_env_python = creative.get(
-        "gen_env_python", ".venv-gen/Scripts/python.exe"
-    )
-    gen_script = creative.get("generator_script", "src/generator/run_generate.py")
-    steps = int(creative.get("steps", 24))
-    default_cfg = creative.get("cfg", 8.0)
-
-    if not Path(gen_env_python).exists():
-        logger.error("Generator python not found at %s", gen_env_python)
-        return 2
-
-    _unload_ollama(config)
-
-    manifest: list[dict] = []
-    log_path = out_dir / "render.log"
-    ok = 0
-    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-
-    for shot in plan:
-        mode = set_cfg.get("mode", creative.get("mode", "text2img"))
-        out_file = out_dir / f"img_{shot['index']:02d}.png"
-        anchor = None
-        if mode == "img2img":
-            pool = pools.get(shot["cat"])
-            if not pool:
-                logger.error(
-                    "No anchor pool for '%s'; did --label-vault run?",
-                    shot["cat"],
-                )
-                continue
-            anchor = anchor_for_shot(pool, shot["index"])
-        if out_file.exists():
-            logger.info("Shot %d already rendered; skipping", shot["index"])
-            ok += 1
-            manifest.append(
-                {
-                    **shot,
-                    "anchor_id": anchor["vault_media_id"] if anchor else None,
-                    "out": str(out_file),
-                }
-            )
-            continue
-
-        logger.info(
-            "Rendering shot %d (%s, %s%s): %s",
-            shot["index"],
-            shot["cat"],
-            mode,
-            f", anchor #{anchor['vault_media_id']}" if anchor else "",
-            shot["scene"],
-        )
-        cmd = [
-            gen_env_python,
-            "-X",
-            "utf8",
-            gen_script,
-            "--mode",
-            mode,
-            "--prompt",
-            shot["image_prompt"],
-            "--negative",
-            shot.get("negative", ""),
-        ]
-        if anchor:
-            cmd += ["--ref", anchor["path"], "--zoom", str(1.25)]
-        cmd += [
-            "--out",
-            str(out_file),
-            "--steps",
-            str(steps),
-            "--denoise",
-            str(shot["denoise"]),
-            "--seed",
-            str(shot["seed"]),
-            "--cfg",
-            str(set_cfg.get("cfg", default_cfg)),
-        ]
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            cwd=str(Path(__file__).parent),
-            check=False,
-        )
-        with open(log_path, "a", encoding="utf-8") as lf:
-            lf.write(proc.stdout + "\n")
-            if proc.returncode != 0:
-                lf.write(proc.stderr + "\n")
-        if proc.returncode != 0 or not out_file.exists():
-            logger.error("Render failed for shot %d (rc=%d)", shot["index"], proc.returncode)
-            continue
-        ok += 1
-        manifest.append(
-            {
-                **shot,
-                "anchor_id": anchor["vault_media_id"],
-                "out": str(out_file),
-            }
-        )
-
-    with open(out_dir / "manifest.json", "w", encoding="utf-8") as fh:
-        json.dump(
-            {"set": set_key, "items": manifest},
-            fh,
-            indent=2,
-            ensure_ascii=False,
-        )
-
-    lines = [f"# {set_cfg.get('name', set_key)}", ""]
-    for m in manifest:
-        anchor_line = (
-            [f"anchor: #{m['anchor_id']}"] if m.get("anchor_id") else []
-        )
-        lines += (
-            [f"## Shot {m['index']} - {m['cat']}"]
-            + anchor_line
-            + [
-                f"file: `{m['out']}`",
-                f"prompt: {m['image_prompt']}",
-                f"caption: {m['caption']}",
-                f"reel: {m['reel_text']}",
-                "",
-            ]
-        )
-    (out_dir / "digest.md").write_text("\n".join(lines), encoding="utf-8")
-    logger.info(
-        "Set '%s': %d/%d rendered; digest at %s",
-        set_key,
-        ok,
-        len(plan),
-        out_dir / "digest.md",
-    )
-    return 0 if ok else 1
-
 
 def run_reel_produce(config: dict, set_key: str) -> int:
     """Assisted production of a set's missing clips (browser-driven).
@@ -1543,18 +1328,6 @@ def main(argv: list[str] | None = None) -> int:
         help="Post id required by --retry",
     )
     parser.add_argument(
-        "--generate-set",
-        default=None,
-        help="Generate a creative 'digital twin' set locally (no IG/Telegram); "
-        "see config/creative/sets.json for available sets",
-    )
-    parser.add_argument(
-        "--set-shots",
-        type=int,
-        default=None,
-        help="Override the number of shots for --generate-set",
-    )
-    parser.add_argument(
         "--reel-plan",
         action="store_true",
         help="Plan Reel briefs for a creative set (--set) from real vault "
@@ -1606,13 +1379,11 @@ def main(argv: list[str] | None = None) -> int:
         return run_drafts_vault(cfg, args.account)
     if args.resolve_chat:
         return run_resolve_chat(cfg, bot_token=args.vault_bot_token)
-    if args.generate_set:
-        return run_generate_set(cfg, args.generate_set, shots=args.set_shots)
     if args.reel_plan:
         if not args.set_key:
             parser.error("--reel-plan requires --set")
             return 2
-        return run_reel_plan(cfg, args.set_key, shots=args.set_shots)
+        return run_reel_plan(cfg, args.set_key)
     if args.reel_produce:
         if not args.set_key:
             parser.error("--reel-produce requires --set")

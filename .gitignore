@@ -19,8 +19,7 @@ data/input_media/*
 data/vault/*
 !data/vault/.gitkeep
 
-# Twin generator env & outputs
-.venv-gen/
+# Reel set outputs (briefs, downloaded clips)
 data/generated/*
 
 # AI video Reel pipeline: browser profile + downloaded clips
