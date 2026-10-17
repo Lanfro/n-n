@@ -28,6 +28,7 @@ from src.engine.prompt_generator import PersonaStore, PromptGenerator
 from src.engine.scene_writer import SceneWriter, load_sets
 from src.generator.anchors import anchor_for_shot, last_10_anchors
 from src.publisher.meta_publisher import MetaPublisher
+from src.reel.brief import plan_set as run_reel_plan
 from src.vault.media_host import build_media_host
 from src.vault.media_vault import MediaNotSupportedError, MediaVault
 from src.vault.telegram_archive import TelegramVault, VaultArchiveError
@@ -1288,6 +1289,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Override the number of shots for --generate-set",
     )
+    parser.add_argument(
+        "--reel-plan",
+        action="store_true",
+        help="Plan Reel briefs for a creative set (--set) from real vault "
+        "photos and write reel_brief_NN.json + manifest.json, then exit",
+    )
+    parser.add_argument(
+        "--set",
+        dest="set_key",
+        default=None,
+        help="Creative set key (for --reel-plan / --reel-produce / --reel-publish)",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -1307,6 +1320,11 @@ def main(argv: list[str] | None = None) -> int:
         return run_resolve_chat(cfg, bot_token=args.vault_bot_token)
     if args.generate_set:
         return run_generate_set(cfg, args.generate_set, shots=args.set_shots)
+    if args.reel_plan:
+        if not args.set_key:
+            parser.error("--reel-plan requires --set")
+            return 2
+        return run_reel_plan(cfg, args.set_key, shots=args.set_shots)
     if args.retry:
         if not args.post_id:
             parser.error("--retry requires --post-id")

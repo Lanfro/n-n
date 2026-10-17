@@ -48,10 +48,39 @@ QUALITY_TAGS = (
     "single subject, no text, no watermark"
 )
 
+# Fallback motion cue when a scene carries no explicit motion description.
+DEFAULT_MOTION = (
+    "subtle, natural movement: slow blinks, small head turns, gentle "
+    "breathing, soft ambient motion"
+)
+
 
 def load_sets(path: str | Path) -> dict:
     with open(path, "r", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def scene_text(scene) -> str:
+    """Scene description text, from either a string or a {scene,motion} dict."""
+    if isinstance(scene, dict):
+        return str(scene.get("scene", ""))
+    return str(scene)
+
+
+def scene_motion(scene) -> str:
+    """Explicit motion cue for a scene (empty when the scene is a plain string)."""
+    if isinstance(scene, dict):
+        return str(scene.get("motion", ""))
+    return ""
+
+
+def build_motion_prompt(motion: str, scene: str) -> str:
+    """Compose an image-to-video prompt from a motion cue and the scene."""
+    cue = (motion or DEFAULT_MOTION).strip().rstrip(".")
+    body = scene.strip().rstrip(".")
+    if body:
+        return f"{cue}. Setting: {body}."
+    return f"{cue}."
 
 
 def _seed_for(set_key: str, index: int) -> int:
@@ -60,7 +89,8 @@ def _seed_for(set_key: str, index: int) -> int:
 
 
 def _fallback_shot(
-    set_key: str, set_cfg: dict, index: int, scene: str, persona: dict
+    set_key: str, set_cfg: dict, index: int, scene: str, persona: dict,
+    motion: str = "",
 ) -> dict:
     name = persona.get("name", "cat")
     descriptor = persona.get("image_descriptor", "a photorealistic cat")
@@ -85,6 +115,7 @@ def _fallback_shot(
         "account": ACCOUNT_BY_CAT.get(name.lower(), "cat_1"),
         "scene": scene,
         "image_prompt": prompt,
+        "motion_prompt": build_motion_prompt(motion, scene),
         "negative": set_cfg.get("negative", ""),
         "denoise": float(set_cfg.get("denoise", 0.45)),
         "seed": _seed_for(set_key, index),
@@ -126,11 +157,21 @@ class SceneWriter:
             else:
                 cat = mode
             persona = personas[ACCOUNT_BY_CAT[cat]]
-            plan.append(self._write_shot(set_key, set_cfg, i, scene, persona))
+            plan.append(
+                self._write_shot(
+                    set_key,
+                    set_cfg,
+                    i,
+                    scene_text(scene),
+                    persona,
+                    motion=scene_motion(scene),
+                )
+            )
         return plan
 
     def _write_shot(
-        self, set_key: str, set_cfg: dict, index: int, scene: str, persona: dict
+        self, set_key: str, set_cfg: dict, index: int, scene: str, persona: dict,
+        motion: str = "",
     ) -> dict:
         caption_rules = persona.get("caption_rules", {})
         voice = caption_rules.get("tone", persona.get("name", "cat"))
@@ -151,11 +192,15 @@ class SceneWriter:
             if raw and self._parse_json(raw).get("prompt"):
                 break
         if raw is None:
-            return _fallback_shot(set_key, set_cfg, index, scene, persona)
+            return _fallback_shot(
+                set_key, set_cfg, index, scene, persona, motion
+            )
 
         parsed = self._parse_json(raw)
         if not parsed.get("prompt") or not parsed.get("caption"):
-            return _fallback_shot(set_key, set_cfg, index, scene, persona)
+            return _fallback_shot(
+                set_key, set_cfg, index, scene, persona, motion
+            )
 
         caption = str(parsed.get("caption", ""))
         reel = str(parsed.get("reel", ""))
@@ -163,9 +208,13 @@ class SceneWriter:
             r"(?:[,;:]*\s+#[0-9A-Za-z_]+[,.;!?]*)+$", "", caption
         ).rstrip(" ,;:.").strip()
         if caption.lower().strip().startswith("scene:") or len(caption) < 8:
-            return _fallback_shot(set_key, set_cfg, index, scene, persona)
+            return _fallback_shot(
+                set_key, set_cfg, index, scene, persona, motion
+            )
         if re.search(r"\bpoint\s+of\s+view\b", caption, re.IGNORECASE):
-            return _fallback_shot(set_key, set_cfg, index, scene, persona)
+            return _fallback_shot(
+                set_key, set_cfg, index, scene, persona, motion
+            )
 
         return {
             "index": index,
@@ -175,6 +224,7 @@ class SceneWriter:
             ),
             "scene": scene,
             "image_prompt": str(parsed["prompt"]).strip(),
+            "motion_prompt": build_motion_prompt(motion, scene),
             "negative": set_cfg.get("negative", ""),
             "denoise": float(set_cfg.get("denoise", 0.45)),
             "seed": _seed_for(set_key, index),

@@ -8,11 +8,26 @@
     "shots": 5,
     "cat": "both",
     "scenes": [
-      "breakfast at a tiny Parisian bistro table",
-      "the morning nap on a Tokyo balcony overlooking the city",
-      "an afternoon sunbeam in a grand library reading room",
-      "window-watching a rainy London street at dusk",
-      "evening lamp-lit reading on a vintage velvet armchair"
+      {
+        "scene": "breakfast at a tiny Parisian bistro table",
+        "motion": "the cat blinks slowly and sniffs the air, whiskers twitching, then glances off to the side; subtle head movement, soft natural light"
+      },
+      {
+        "scene": "the morning nap on a Tokyo balcony overlooking the city",
+        "motion": "the cat breathes gently in its sleep, ears flicking once, tail tip curling slowly; calm, steady motion"
+      },
+      {
+        "scene": "an afternoon sunbeam in a grand library reading room",
+        "motion": "the cat stretches one front paw forward, yawns wide, and settles deeper into the sunbeam; slow, languid movement"
+      },
+      {
+        "scene": "window-watching a rainy London street at dusk",
+        "motion": "the cat's head follows raindrops on the glass, ears rotating, and it licks its nose once; gentle tracking motion"
+      },
+      {
+        "scene": "evening lamp-lit reading on a vintage velvet armchair",
+        "motion": "the cat blinks awake, turns its head toward the lamp, and its chest rises and falls calmly; soft, slow motion"
+      }
     ],
     "mode": "text2img",
     "cfg": 8.0
@@ -26,11 +41,26 @@
     "shots": 5,
     "cat": "both",
     "scenes": [
-      "as a 1940s detective examining clues under a desk lamp",
-      "as head pastry chef in a spotless bakery kitchen",
-      "as lighthouse keeper in a lonely Atlantic lighthouse at dusk",
-      "as museum curator guarding a priceless masterpiece",
-      "as captain of a tiny sailing ship in a framed pirate portrait"
+      {
+        "scene": "as a 1940s detective examining clues under a desk lamp",
+        "motion": "the cat peers closely at the clue, tilts its head in thought, and taps the desk once with a paw; deliberate, curious motion"
+      },
+      {
+        "scene": "as head pastry chef in a spotless bakery kitchen",
+        "motion": "the cat kneads the dough with both front paws and glances up proudly; rhythmic, busy movement"
+      },
+      {
+        "scene": "as lighthouse keeper in a lonely Atlantic lighthouse at dusk",
+        "motion": "the cat gazes out at the sea, fur ruffling in the wind, and turns its head slowly toward the light; steady motion"
+      },
+      {
+        "scene": "as museum curator guarding a priceless masterpiece",
+        "motion": "the cat sits upright, scans the room slowly, and raises one paw in a guarding gesture; composed, alert motion"
+      },
+      {
+        "scene": "as captain of a tiny sailing ship in a framed pirate portrait",
+        "motion": "the cat's whiskers and ears shift in the sea breeze and it nods once at the horizon; subtle, dignified motion"
+      }
     ],
     "mode": "text2img",
     "cfg": 8.0
@@ -44,11 +74,26 @@
     "shots": 5,
     "cat": "both",
     "scenes": [
-      "in the style of Rembrandt, dark dramatic studio portrait",
-      "in the style of Monet, soft impressionist garden light",
-      "in the style of Vermeer, candle-lit Dutch interior",
-      "in the style of Van Gogh, swirling starry sky background",
-      "in the style of a Renaissance court portrait with rich velvet drapery"
+      {
+        "scene": "in the style of Rembrandt, dark dramatic studio portrait",
+        "motion": "the cat holds its pose, eyes shifting slowly as light plays across its face; subtle, theatrical motion"
+      },
+      {
+        "scene": "in the style of Monet, soft impressionist garden light",
+        "motion": "the cat turns its head gently, fur and garden light shimmering; soft, impressionist drift"
+      },
+      {
+        "scene": "in the style of Vermeer, candle-lit Dutch interior",
+        "motion": "the cat blinks once in the candlelight and its pupils adjust; tiny, intimate motion"
+      },
+      {
+        "scene": "in the style of Van Gogh, swirling starry sky background",
+        "motion": "the cat looks up as swirling light moves behind it, ears tilting; dreamlike, flowing motion"
+      },
+      {
+        "scene": "in the style of a Renaissance court portrait with rich velvet drapery",
+        "motion": "the cat sits regally, only its eyes and tail tip moving; stately, restrained motion"
+      }
     ],
     "mode": "text2img",
     "cfg": 8.5
@@ -62,11 +107,26 @@
     "shots": 5,
     "cat": "both",
     "scenes": [
-      "sitting inside an Airstream-shape cat house in a snowy diorama",
-      "peeking from a miniature Parisian apartment built in a terrarium",
-      "lounging on a giant chessboard under a desk lamp",
-      "taking a bath in a tiny bathtub in a dollhouse kitchen",
-      "asleep inside an open giant bookshelf diorama"
+      {
+        "scene": "sitting inside an Airstream-shape cat house in a snowy diorama",
+        "motion": "the cat shifts its weight and pokes its nose toward the falling snow; small, cozy motion"
+      },
+      {
+        "scene": "peeking from a miniature Parisian apartment built in a terrarium",
+        "motion": "the cat peeks out, whiskers twitching, and retreats slightly; cautious, curious motion"
+      },
+      {
+        "scene": "lounging on a giant chessboard under a desk lamp",
+        "motion": "the cat bats a chess piece with one paw and watches it roll; playful, quick motion"
+      },
+      {
+        "scene": "taking a bath in a tiny bathtub in a dollhouse kitchen",
+        "motion": "the cat flicks water with a paw and shakes its head once; splashing, lively motion"
+      },
+      {
+        "scene": "asleep inside an open giant bookshelf diorama",
+        "motion": "the cat stirs in its sleep, paws twitching, and curls tighter; sleepy, gentle motion"
+      }
     ],
     "mode": "text2img",
     "cfg": 8.0
@@ -80,11 +140,26 @@
     "shots": 5,
     "cat": "both",
     "scenes": [
-      "dreaming of a world with no vacuum cleaners, floating in a sky of feather dusters turned into clouds",
-      "dreaming of an endless warm sunbeam that curves like a golden river",
-      "dreaming of a giant glass of milk the size of a swimming pool",
-      "dreaming of melting grandfather clocks and floating fish in a room without gravity",
-      "dreaming of being the king of a kingdom made entirely of cardboard boxes"
+      {
+        "scene": "dreaming of a world with no vacuum cleaners, floating in a sky of feather dusters turned into clouds",
+        "motion": "the cat floats and paddles its paws slowly through drifting feathers; weightless, dreamy motion"
+      },
+      {
+        "scene": "dreaming of an endless warm sunbeam that curves like a golden river",
+        "motion": "the cat glides along the glowing current, tail trailing; flowing, surreal motion"
+      },
+      {
+        "scene": "dreaming of a giant glass of milk the size of a swimming pool",
+        "motion": "the cat laps at the milk and its reflection ripples; liquid, rippling motion"
+      },
+      {
+        "scene": "dreaming of melting grandfather clocks and floating fish in a room without gravity",
+        "motion": "the cat watches the clockfaces bend and slowly turns its head; disorienting, dreamlike motion"
+      },
+      {
+        "scene": "dreaming of being the king of a kingdom made entirely of cardboard boxes",
+        "motion": "the cat surveys its kingdom, turns on the spot, and settles onto the throne; slow, regal motion"
+      }
     ],
     "mode": "text2img",
     "cfg": 8.5
