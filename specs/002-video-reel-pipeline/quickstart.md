@@ -1,0 +1,146 @@
+# Quickstart — Validation Guide
+
+Phase 1 output of `/speckit.plan`. Runnable scenarios that prove the Reel feature
+works end-to-end. Full implementation lives in `tasks.md`; this file is the
+validation/run guide.
+
+## Prerequisites
+
+- `uv` installed; Python >= 3.11; repo cloned; `uv sync` run once.
+- `ffmpeg`/`ffprobe` available on `PATH` (clip validation/repair).
+- For assisted production: `uv run playwright install chromium`, and a one-time
+  manual login to the video service in the persistent profile.
+- For live publishing: `config/config.local.yaml` filled (`meta.*`, telegram,
+  `vault.host.backend: r2` for a public clip URL).
+
+## Scenario 1 — Plan Reel briefs (offline)
+
+```
+uv run main.py --reel-plan --set parallel_lives
+```
+
+**Expected**: `data/generated/parallel_lives/reel_brief_NN.json` written (one per
+shot, bounded by the set's scene count), each referencing an existing, labelled
+cat photo in the vault; `manifest.json` lists the briefs; each brief carries a
+motion prompt, an `expected_output` filename, and persona-compliant
+caption/hook/hashtags. No network calls.
+
+**Proves**: FR-001–FR-004, SC-004.
+
+## Scenario 2 — Validate a produced clip
+
+Place a downloaded/obtained clip at the brief's `expected_output`, then:
+
+```
+uv run main.py --reel-validate --set parallel_lives --brief parallel_lives:0
+```
+
+**Expected**: ffprobe-derived report; a compliant clip reports `valid`; a silent
+clip reports `repaired` with `silent` caveat; a non-vertical/too-short/too-large
+clip reports `rejected` with the precise reason and is **not** eligible for
+approval.
+
+**Proves**: FR-010, FR-011, [reel-clip-requirements.md](contracts/reel-clip-requirements.md).
+
+## Scenario 3 — Dry-run Reel publish (hermetic)
+
+```
+uv run main.py --reel-publish --set parallel_lives --brief parallel_lives:0 --dry-run
+```
+
+**Expected**: the clip is validated, then a post is created and moved
+`PENDING_ANALYSIS -> AWAITING_APPROVAL -> APPROVED` via auto-approval, "would
+create Reel container", poll skipped, "would publish container", and the post
+reaches `PUBLISHED` with a synthetic `media_dry_*` id. No network, no browser.
+
+**Proves**: FR-012, FR-013, FR-015, SC-005; the approval gate is the only path to
+`PUBLISHED`.
+
+## Scenario 4 — Assisted production (operator present)
+
+```
+uv run main.py --reel-produce --set parallel_lives
+```
+
+**Expected (steady state)**: for each missing clip the browser opens the service,
+uploads the source photo, fills the motion prompt, generates, and downloads
+`reel_NN.mp4`; already-present clips are skipped. Run it again and confirm no clip
+is regenerated.
+
+**Expected (blocked)**: on a login/anti-bot challenge or exhausted daily
+allowance, an operator alert fires (sound + Telegram) within one minute, the run
+pauses cleanly, and previously produced clips remain. Drop the clip in by hand
+under `expected_output` and re-run to confirm it is treated as produced.
+
+**Proves**: FR-005, FR-007, FR-008, FR-009, SC-003, SC-006,
+[video-service-browser.md](contracts/video-service-browser.md).
+
+## Scenario 5 — Live Reel publish with human approval
+
+1. Configure `meta.dry_run: false` and R2 hosting in `config.local.yaml`.
+2. Run `uv run main.py --reel-publish --set parallel_lives --brief parallel_lives:0`.
+
+**Expected**: the clip is validated → the approval request arrives on Telegram
+**with a video preview** → on approve, the clip is uploaded to R2, a Reel
+container is created (`media_type=REELS`), processing is polled to `FINISHED`, the
+container is published, and the post reaches `PUBLISHED` with `ig_media_id`. The
+caption contains the AI-generated disclosure.
+
+**Caution**: `meta.dry_run` defaults to `true`; set it `false` explicitly. Media
+must be publicly reachable ([meta-graph-api-reels.md](contracts/meta-graph-api-reels.md)
++ `specs/001-.../contracts/media-host.md`).
+
+**Proves**: FR-012–FR-017, FR-019, SC-001.
+
+## Scenario 6 — Retry a failed publish (no duplicate)
+
+Force a publish failure (e.g. invalid token), observe the post in `FAILED` with
+the platform error, then retry:
+
+```
+uv run main.py --reel-publish --set parallel_lives --brief parallel_lives:0
+```
+
+**Expected**: re-validation + a fresh approval-gated publish; on success no
+duplicate Reel is created for the same `brief_id`.
+
+**Proves**: FR-015, SC-005, SC-007.
+
+## Scenario 7 — Static generation is retired
+
+```
+uv run main.py --generate-set parallel_lives      # must be rejected as unknown
+```
+
+**Expected**: the flag no longer exists (argparse error); `src/generator/` and
+`.venv-gen/` are gone; no `creative.gen_env_python`/`model`/`steps` keys remain.
+
+**Proves**: FR-018.
+
+## Scenario 8 — Regression: photo pipeline intact
+
+```
+uv run main.py --account cat_1 --media data/input_media/sample_cat.jpg --dry-run
+```
+
+**Expected**: unchanged behaviour — reaches `PUBLISHED` in dry-run, exit 0.
+
+**Proves**: the Reel feature does not regress the existing photo pipeline.
+
+## Scenario 9 — Lint + tests
+
+```
+uv run ruff check
+uv run pytest
+```
+
+**Expected**: ruff clean; pytest green (brief builder, validator with fixture
+clips, Reels publisher with mocked HTTP, browser producer with mocked Playwright).
+
+## References
+
+- Data model & status machine: [data-model.md](data-model.md)
+- Reel brief contract: [contracts/reel-brief.md](contracts/reel-brief.md)
+- Browser producer contract: [contracts/video-service-browser.md](contracts/video-service-browser.md)
+- Clip requirements: [contracts/reel-clip-requirements.md](contracts/reel-clip-requirements.md)
+- Publishing contract: [contracts/meta-graph-api-reels.md](contracts/meta-graph-api-reels.md)
