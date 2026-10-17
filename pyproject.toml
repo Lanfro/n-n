@@ -10,6 +10,7 @@ dependencies = [
     "pyyaml>=6.0",
     "python-telegram-bot[callback-data]>=21.0",
     "requests>=2.31.0",
+    "playwright>=1.64.0",
 ]
 
 [dependency-groups]

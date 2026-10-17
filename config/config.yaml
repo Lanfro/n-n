@@ -87,3 +87,30 @@ creative:
   # Default render recipe (per-set values in sets.json override these)
   mode: "text2img"
   cfg: 8.0
+
+# AI Video Reel pipeline: animate real vault cat photos into 9:16 clips via an
+# assisted browser session on a free third-party service, then publish as Reels
+# through the official Meta Graph API after human approval.
+reel:
+  # External image-to-video service (browser-driven; never Instagram)
+  service: "pixverse"
+  service_url: "https://app.pixverse.ai"
+  # Persistent, gitignored Playwright profile (operator logs in once)
+  browser_profile_dir: "data/.browser/reel"
+  # Where the external-service selectors live (one-file repair on UI drift)
+  selectors_path: "config/reel/selectors.json"
+  # Headed is required for anti-bot handling + operator intervention
+  headless: false
+  # Bounded wait for a single clip generation (seconds)
+  generation_timeout_seconds: 600
+  aspect: "9:16"
+  min_resolution: [540, 960]
+  target_resolution: [1080, 1920]
+  min_duration_seconds: 3
+  max_duration_seconds: 900
+  # 5-90 s to appear in the Reels tab (preferred floor)
+  preferred_min_duration_seconds: 5
+  max_size_mb: 300
+  publish:
+    # Also surface the Reel in the account feed (Meta `share_to_feed`)
+    share_to_feed: true

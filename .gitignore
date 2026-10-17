@@ -23,6 +23,9 @@ data/vault/*
 .venv-gen/
 data/generated/*
 
+# AI video Reel pipeline: browser profile + downloaded clips
+data/.browser/
+
 # Config secrets (keep template)
 config/*.local.yaml
 

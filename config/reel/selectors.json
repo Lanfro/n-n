@@ -1,0 +1,66 @@
+{
+  "service": "pixverse",
+  "urls": {
+    "home": "https://app.pixverse.ai",
+    "login": "https://app.pixverse.ai/login",
+    "workspace": "https://app.pixverse.ai/create"
+  },
+  "selectors": {
+    "logged_in": [
+      "[data-testid='user-avatar']",
+      "button:has-text('Log out')",
+      "img[alt*='avatar' i]"
+    ],
+    "login_form": [
+      "input[type='email']",
+      "input[name='email']",
+      "button:has-text('Sign in')"
+    ],
+    "upload_input": [
+      "input[type='file']"
+    ],
+    "prompt_field": [
+      "textarea[placeholder*='prompt' i]",
+      "[data-testid='prompt-input']",
+      "textarea"
+    ],
+    "aspect_9_16": [
+      "[data-aspect='9:16']",
+      "button:has-text('9:16')",
+      "text=9:16"
+    ],
+    "duration_control": [
+      "[data-testid='duration']",
+      "select[name='duration']"
+    ],
+    "generate_button": [
+      "button:has-text('Create')",
+      "button:has-text('Generate')",
+      "[data-testid='generate-button']"
+    ],
+    "result_video": [
+      "video",
+      "video source"
+    ],
+    "download_button": [
+      "a[download]",
+      "button:has-text('Download')",
+      "[data-testid='download-button']"
+    ]
+  },
+  "markers": {
+    "challenge": [
+      "text=verify you are human",
+      "text=unusual traffic",
+      "iframe[src*='captcha' i]",
+      "iframe[src*='recaptcha' i]",
+      "iframe[src*='hcaptcha' i]"
+    ],
+    "limit": [
+      "text=out of credits",
+      "text=no credits",
+      "text=daily limit",
+      "text=insufficient credits"
+    ]
+  }
+}
