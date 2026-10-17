@@ -39,13 +39,16 @@ logger = logging.getLogger(__name__)
 UNEXPECTED_UI = "unexpected_ui"
 
 # JS: centre of the smallest visible element whose text exactly equals `arg[0]`,
-# inside the [arg[1], arg[2]] vertical band (used to pick a popover option).
+# inside the vertical band `arg[1]..arg[2]` (fractions of the viewport height).
+# Used to pick a popover option, excluding the bottom settings-token row.
 _CLICK_TEXT_JS = r"""
-([text, ymin, ymax]) => {
+([text, yminFrac, ymaxFrac]) => {
   const vis = (el) => { const r = el.getBoundingClientRect();
     const st = window.getComputedStyle(el);
     return r.width > 0 && r.height > 0 && st.visibility !== 'hidden'
       && st.display !== 'none'; };
+  const h = window.innerHeight;
+  const ymin = yminFrac * h, ymax = ymaxFrac * h;
   const cands = [];
   for (const el of document.querySelectorAll('div, span, button, p, label')) {
     if (!vis(el)) continue;
@@ -306,7 +309,7 @@ class PlaywrightDriver:
         return [value for value in (res, aspect, dur) if value]
 
     def _click_exact_text(
-        self, text: str, *, ymin: float = 0, ymax: float = 100000
+        self, text: str, *, ymin: float = 0.0, ymax: float = 1.0
     ) -> bool:
         box = self.page.evaluate(_CLICK_TEXT_JS, [text, ymin, ymax])
         if not box:
@@ -335,7 +338,9 @@ class PlaywrightDriver:
             return
         time.sleep(1.0)
         for value in options:
-            if not self._click_exact_text(value, ymin=120):
+            # Popover options sit in the middle band; the bottom 0.88+ is the
+            # settings-token row that opened the popover.
+            if not self._click_exact_text(value, ymin=0.15, ymax=0.88):
                 logger.debug("Setting option %r not found in popover", value)
             time.sleep(0.5)
         try:

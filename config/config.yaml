@@ -96,10 +96,10 @@ reel:
   generation_timeout_seconds: 600
   aspect: "9:16"
   # Create-page settings applied via the service's settings popover.
-  # 540P is the cheapest resolution that still meets min_resolution; the free
-  # tier's daily credits make 3s the affordable clip length.
+  # 540P is the cheapest resolution that still meets min_resolution; 5s is the
+  # spec's preferred Reels floor (a 5s 540P clip costs ~38 service credits).
   resolution: "540P"
-  duration_seconds: 3
+  duration_seconds: 5
   min_resolution: [540, 960]
   target_resolution: [1080, 1920]
   min_duration_seconds: 3
