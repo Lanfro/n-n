@@ -10,6 +10,7 @@ Only explicit, validated transitions are allowed so that no content
 reaches the publisher without a recorded, human-approved state.
 """
 
+import json
 import sqlite3
 import threading
 from datetime import UTC, datetime
@@ -58,6 +59,9 @@ CREATE TABLE IF NOT EXISTS posts (
     ig_media_id TEXT,
     meta_error TEXT,
     vault_media_id INTEGER,
+    media_type TEXT,
+    brief_id TEXT,
+    reel_meta TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -117,6 +121,11 @@ VAULT_SOURCES = {"drop", "ai_generated", "telegram"}
 VAULT_MEDIA_TYPES = {"image", "video"}
 SUBJECT_LABELS = {"nero", "nuvola", "both", "unclear"}
 
+# Post media types: legacy image posts vs. AI video Reel posts
+MEDIA_TYPE_IMAGE = "image"
+MEDIA_TYPE_REEL = "reel"
+POST_MEDIA_TYPES = {MEDIA_TYPE_IMAGE, MEDIA_TYPE_REEL}
+
 
 def _utcnow() -> str:
     return datetime.now(UTC).isoformat()
@@ -134,7 +143,7 @@ class DBManager:
         self._conn.execute("PRAGMA journal_mode=WAL;")
         with self._lock:
             self._conn.executescript(_SCHEMA)
-            self._migrate_posts_vault_media()
+            self._migrate_posts()
             self._conn.execute(
                 """
                 INSERT OR IGNORE INTO channel_sync (id, last_update_id, updated_at)
@@ -144,8 +153,13 @@ class DBManager:
             )
             self._conn.commit()
 
-    def _migrate_posts_vault_media(self) -> None:
-        """Add the vault_media_id column to posts if it predates the vault."""
+    def _migrate_posts(self) -> None:
+        """Add additive columns to `posts` if the table predates them.
+
+        `vault_media_id` predates the vault; `media_type`/`brief_id`/`reel_meta`
+        predate the AI video Reel pipeline. All are added via guarded
+        `ALTER TABLE ADD COLUMN` so existing databases keep working.
+        """
         columns = {
             row["name"]
             for row in self._conn.execute("PRAGMA table_info(posts)").fetchall()
@@ -154,6 +168,23 @@ class DBManager:
             self._conn.execute(
                 "ALTER TABLE posts ADD COLUMN vault_media_id INTEGER"
             )
+        if "media_type" not in columns:
+            self._conn.execute(
+                "ALTER TABLE posts ADD COLUMN media_type TEXT"
+            )
+        if "brief_id" not in columns:
+            self._conn.execute("ALTER TABLE posts ADD COLUMN brief_id TEXT")
+        if "reel_meta" not in columns:
+            self._conn.execute("ALTER TABLE posts ADD COLUMN reel_meta TEXT")
+        # Partial unique index: at most one reel post per (account, brief).
+        # Created after the migration so the columns are guaranteed present.
+        self._conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_reel_brief
+                ON posts (account_key, brief_id)
+             WHERE media_type = 'reel'
+            """
+        )
 
     def close(self) -> None:
         with self._lock:
@@ -520,6 +551,91 @@ class DBManager:
                 (vault_media_id, _utcnow(), post_id),
             )
             self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Reel posts (AI video Reels tracked in the same `posts` table)
+    # ------------------------------------------------------------------
+
+    def create_reel_post(
+        self,
+        account_key: str,
+        media_path: str,
+        brief_id: str,
+        *,
+        reel_meta: dict | str | None = None,
+    ) -> int:
+        """Insert a new AS:'reel' post in PENDING_ANALYSIS and return its id.
+
+        The partial unique index `idx_posts_reel_brief` enforces one reel post
+        per `(account_key, brief_id)`; callers that may re-run should look up an
+        existing post first via `get_reel_post_by_brief`.
+        """
+        now = _utcnow()
+        meta = self._encode_reel_meta(reel_meta)
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO posts
+                    (account_key, media_path, status, media_type, brief_id,
+                     reel_meta, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    account_key,
+                    media_path,
+                    PENDING_ANALYSIS,
+                    MEDIA_TYPE_REEL,
+                    brief_id,
+                    meta,
+                    now,
+                    now,
+                ),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def get_reel_post_by_brief(
+        self, account_key: str, brief_id: str
+    ) -> dict | None:
+        """Return the reel post for a brief, if one exists (dedup/retry)."""
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT * FROM posts
+                 WHERE media_type = ? AND account_key = ? AND brief_id = ?
+                 ORDER BY id DESC LIMIT 1
+                """,
+                (MEDIA_TYPE_REEL, account_key, brief_id),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def set_reel_meta(self, post_id: int, reel_meta: dict | str | None) -> None:
+        """Store the serialised validation summary + caveats on a reel post."""
+        meta = self._encode_reel_meta(reel_meta)
+        with self._lock:
+            self._conn.execute(
+                "UPDATE posts SET reel_meta = ?, updated_at = ? WHERE id = ?",
+                (meta, _utcnow(), post_id),
+            )
+            self._conn.commit()
+
+    def get_reel_meta(self, post_id: int) -> dict | None:
+        """Decode a reel post's stored validation summary (or None)."""
+        post = self.get_post(post_id)
+        if not post or not post.get("reel_meta"):
+            return None
+        try:
+            return json.loads(post["reel_meta"])
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _encode_reel_meta(reel_meta: dict | str | None) -> str | None:
+        if reel_meta is None:
+            return None
+        if isinstance(reel_meta, str):
+            return reel_meta
+        return json.dumps(reel_meta, ensure_ascii=False)
 
     # ------------------------------------------------------------------
     # Channel sync cursor (single row, idempotent)
