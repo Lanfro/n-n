@@ -29,6 +29,7 @@ from src.engine.scene_writer import SceneWriter, load_sets
 from src.generator.anchors import anchor_for_shot, last_10_anchors
 from src.publisher.meta_publisher import MetaPublisher
 from src.reel.brief import plan_set as run_reel_plan
+from src.reel.producer import produce_set as _reel_produce_set
 from src.vault.media_host import build_media_host
 from src.vault.media_vault import MediaNotSupportedError, MediaVault
 from src.vault.telegram_archive import TelegramVault, VaultArchiveError
@@ -1205,6 +1206,24 @@ def run_generate_set(config: dict, set_key: str, *, shots: int | None = None) ->
     return 0 if ok else 1
 
 
+def run_reel_produce(config: dict, set_key: str) -> int:
+    """Assisted production of a set's missing clips (browser-driven).
+
+    Returns 0 on progress, 3 when paused for a human (challenge/limit/logout),
+    else 1.
+    """
+    result = _reel_produce_set(config, set_key)
+    if result.paused:
+        logger.warning(
+            "Reel production paused (%s); a human action is required.",
+            result.paused_state,
+        )
+        return 3
+    if result.produced or result.skipped:
+        return 0
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Exotic Shorthair Instagram content pipeline"
@@ -1301,6 +1320,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Creative set key (for --reel-plan / --reel-produce / --reel-publish)",
     )
+    parser.add_argument(
+        "--reel-produce",
+        action="store_true",
+        help="Drive the assisted browser producer to generate any missing clips "
+        "for a set (--set) and download them under each brief's expected name",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -1325,6 +1350,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--reel-plan requires --set")
             return 2
         return run_reel_plan(cfg, args.set_key, shots=args.set_shots)
+    if args.reel_produce:
+        if not args.set_key:
+            parser.error("--reel-produce requires --set")
+            return 2
+        return run_reel_produce(cfg, args.set_key)
     if args.retry:
         if not args.post_id:
             parser.error("--retry requires --post-id")
