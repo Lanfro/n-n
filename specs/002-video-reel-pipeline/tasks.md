@@ -102,17 +102,17 @@ description: "Task list for AI Video Reel Pipeline"
 
 ### Tests for User Story 3
 
-- [ ] T021 [P] [US3] Unit test for the validator (valid / repaired / rejected paths, missing-audio mux, low-res upscale, ffprobe-unavailable fail-safe) using fixture clips in `tests/unit/test_reel_validator.py`
-- [ ] T022 [P] [US3] Unit test for the Reels publisher (container param set, status polling to FINISHED, publish, ERROR handling, dry-run synthetic ids) with mocked HTTP in `tests/unit/test_meta_publisher_reels.py`
+- [X] T021 [P] [US3] Unit test for the validator (valid / repaired / rejected paths, missing-audio mux, low-res upscale, ffprobe-unavailable fail-safe) using fixture clips in `tests/unit/test_reel_validator.py`
+- [X] T022 [P] [US3] Unit test for the Reels publisher (container param set, status polling to FINISHED, publish, ERROR handling, dry-run synthetic ids) with mocked HTTP in `tests/unit/test_meta_publisher_reels.py`
 
 ### Implementation for User Story 3
 
-- [ ] T023 [US3] Implement the clip validator in `src/reel/validator.py` (ffprobe parse; allowed repairs: silent AAC mux + min-res upscale; reject rules; caveats) per `contracts/reel-clip-requirements.md`
-- [ ] T024 [US3] Add `create_reel_container`, `wait_for_container` and reuse `publish_container` in `src/publisher/meta_publisher.py` (`media_type=REELS`, `video_url`, `caption`, `share_to_feed`; bounded status polling; dry-run synthetic ids)
-- [ ] T025 [US3] Extend `src/approval/telegram_gateway.py` to send a video preview (`send_video`) for reel approval requests, keeping the CLI fallback
-- [ ] T026 [US3] Implement the reel publish flow in `main.py`: create/reuse the reel post (validate → `AWAITING_APPROVAL` → gate → `APPROVED`), append the AI-generated disclosure to the caption, host the clip via `MediaHost`, publish via the Reels flow, record ids/errors — depends on T006, T007, T023, T024, T025
-- [ ] T027 [US3] Implement duplicate prevention and retry semantics in `main.py` (reuse post by `brief_id`; re-validate on retry; never create a second Reel)
-- [ ] T028 [US3] Add the `--reel-validate` and `--reel-publish --set <key> --brief <id> [--dry-run]` CLI paths and dispatch in `main.py`
+- [X] T023 [US3] Implement the clip validator in `src/reel/validator.py` (ffprobe parse; allowed repairs: silent AAC mux + min-res upscale; reject rules; caveats) per `contracts/reel-clip-requirements.md`
+- [X] T024 [US3] Add `create_reel_container`, `wait_for_container` and reuse `publish_container` in `src/publisher/meta_publisher.py` (`media_type=REELS`, `video_url`, `caption`, `share_to_feed`; bounded status polling; dry-run synthetic ids)
+- [X] T025 [US3] Extend `src/approval/telegram_gateway.py` to send a video preview (`send_video`) for reel approval requests, keeping the CLI fallback
+- [X] T026 [US3] Implement the reel publish flow in `main.py`: create/reuse the reel post (validate → `AWAITING_APPROVAL` → gate → `APPROVED`), append the AI-generated disclosure to the caption, host the clip via `MediaHost`, publish via the Reels flow, record ids/errors — depends on T006, T007, T023, T024, T025
+- [X] T027 [US3] Implement duplicate prevention and retry semantics in `main.py` (reuse post by `brief_id`; re-validate on retry; never create a second Reel)
+- [X] T028 [US3] Add the `--reel-validate` and `--reel-publish --set <key> --brief <id> [--dry-run]` CLI paths and dispatch in `main.py`
 
 **Checkpoint**: All three stories functional — a real, approved Reel can be published end-to-end.
 

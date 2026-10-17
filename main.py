@@ -27,9 +27,11 @@ from src.database.db_manager import DBManager
 from src.engine.prompt_generator import PersonaStore, PromptGenerator
 from src.engine.scene_writer import SceneWriter, load_sets
 from src.generator.anchors import anchor_for_shot, last_10_anchors
-from src.publisher.meta_publisher import MetaPublisher
+from src.publisher.meta_publisher import MetaPublisher, MetaPublisherError
 from src.reel.brief import plan_set as run_reel_plan
+from src.reel.models import ReelBrief
 from src.reel.producer import produce_set as _reel_produce_set
+from src.reel.validator import validate_clip as _validate_reel_clip
 from src.vault.media_host import build_media_host
 from src.vault.media_vault import MediaNotSupportedError, MediaVault
 from src.vault.telegram_archive import TelegramVault, VaultArchiveError
@@ -50,6 +52,12 @@ IDENTIFY_PROMPT = (
     "(Nuvola), (c) both cats together, or (d) neither/unclear (a close-up, "
     "an object, a non-cat, or the cats are indistinguishable)? Reply with "
     "EXACTLY one word: nero, nuvola, both, or unclear."
+)
+
+# FR-016: every published Reel MUST disclose that the clip was AI-generated.
+# Overridable via `reel.publish.disclosure` in config.yaml.
+DEFAULT_REEL_DISCLOSURE = (
+    "This Reel was generated with AI image-to-video from a real photo of our cat."
 )
 
 # Which cat(s) may appear per account key (see --label-vault).
@@ -1224,6 +1232,244 @@ def run_reel_produce(config: dict, set_key: str) -> int:
     return 1
 
 
+def _reel_out_dir(config: dict, set_key: str) -> Path:
+    creative = config.get("creative", {})
+    return Path(creative.get("out_root", "data/generated")) / set_key
+
+
+def _load_brief(out_dir: Path, brief_id: str) -> ReelBrief | None:
+    """Find a single brief by its id within a set folder."""
+    from src.reel.producer import load_briefs
+
+    for brief in load_briefs(out_dir):
+        if brief.brief_id == brief_id:
+            return brief
+    return None
+
+
+def _reel_caption(brief: ReelBrief, disclosure: str) -> str:
+    """Assemble the published caption: hook, body, hashtags, AI disclosure."""
+    parts: list[str] = []
+    if brief.reel_text:
+        parts.append(brief.reel_text)
+    if brief.caption:
+        parts.append(brief.caption)
+    if brief.hashtags:
+        parts.append(" ".join(brief.hashtags))
+    if disclosure:
+        parts.append(disclosure)
+    return "\n\n".join(p for p in parts if p)
+
+
+def run_reel_validate(config: dict, set_key: str, brief_id: str) -> int:
+    """Validate a produced clip against the clip contract and print a report.
+
+    Returns 0 when the clip is eligible for approval, 1 on rejection, 2 when the
+    brief or clip cannot be found. No network or database side effects.
+    """
+    reel_cfg = config.get("reel", {})
+    out_dir = _reel_out_dir(config, set_key)
+    brief = _load_brief(out_dir, brief_id)
+    if brief is None:
+        logger.error(
+            "Brief '%s' not found in %s (run --reel-plan --set %s first)",
+            brief_id,
+            out_dir,
+            set_key,
+        )
+        return 2
+
+    clip_path = out_dir / brief.expected_output
+    if not clip_path.exists():
+        logger.error(
+            "Clip missing: %s (run --reel-produce --set %s)", clip_path, set_key
+        )
+        return 2
+
+    report = _validate_reel_clip(
+        clip_path, config=reel_cfg, brief_id=brief.brief_id
+    )
+    print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+    if not report.eligible:
+        logger.error("Clip rejected: %s", report.reject_reason)
+        return 1
+    logger.info("Clip %s: %s", brief.expected_output, report.validation)
+    return 0
+
+
+def run_reel_publish(
+    config: dict, set_key: str, brief_id: str, *, dry_run: bool = False
+) -> int:
+    """Approval-gated Reel publish for one brief (validate -> gate -> publish).
+
+    Deduplicated by `(account_key, brief_id)`: an already-published brief is
+    never published twice, and a retry reuses the same post row (FR-015/SC-005).
+    """
+    reel_cfg = config.get("reel", {})
+    pipeline_cfg = config.get("pipeline", {})
+    meta_cfg = config.get("meta", {})
+    telegram_cfg = config.get("telegram", {})
+    approval_cfg = config.get("approval", {})
+    publish_cfg = reel_cfg.get("publish", {}) or {}
+    disclosure = publish_cfg.get("disclosure", DEFAULT_REEL_DISCLOSURE)
+    share_to_feed = bool(publish_cfg.get("share_to_feed", True))
+
+    out_dir = _reel_out_dir(config, set_key)
+    brief = _load_brief(out_dir, brief_id)
+    if brief is None:
+        logger.error(
+            "Brief '%s' not found in %s (run --reel-plan --set %s first)",
+            brief_id,
+            out_dir,
+            set_key,
+        )
+        return 2
+
+    clip_path = out_dir / brief.expected_output
+    if not clip_path.exists():
+        logger.error(
+            "Clip missing: %s (run --reel-produce --set %s)", clip_path, set_key
+        )
+        return 2
+
+    db = DBManager(pipeline_cfg.get("db_path", "data/pipeline.db"))
+
+    # Duplicate prevention: never create a second Reel for the same brief.
+    existing = db.get_reel_post_by_brief(brief.account_key, brief.brief_id)
+    if existing and existing["status"] == "PUBLISHED":
+        logger.info(
+            "Brief %s already published (post %d, media %s); not republishing.",
+            brief.brief_id,
+            existing["id"],
+            existing.get("ig_media_id"),
+        )
+        return 0
+
+    report = _validate_reel_clip(
+        clip_path, config=reel_cfg, brief_id=brief.brief_id
+    )
+
+    if existing is None:
+        post_id = db.create_reel_post(
+            brief.account_key,
+            str(clip_path),
+            brief.brief_id,
+            reel_meta=report.to_dict(),
+        )
+    else:
+        post_id = existing["id"]
+        if existing["status"] != "PENDING_ANALYSIS" and not db.transition(
+            post_id, "PENDING_ANALYSIS"
+        ):
+            logger.error(
+                "Reel post %d could not resume from %s",
+                post_id,
+                existing["status"],
+            )
+            return 1
+        db.set_reel_meta(post_id, report.to_dict())
+
+    if not report.eligible:
+        db.transition(post_id, "REJECTED")
+        logger.error("Clip rejected (%s); not offered for approval.", report.reject_reason)
+        return 1
+
+    if not db.transition(post_id, "AWAITING_APPROVAL"):
+        logger.error("Reel post %d could not enter AWAITING_APPROVAL", post_id)
+        return 1
+
+    caption = _reel_caption(brief, disclosure)
+    gateway = TelegramGateway(
+        db=db,
+        bot_token=telegram_cfg.get("bot_token", ""),
+        allowed_chat_ids=telegram_cfg.get("allowed_chat_ids", []),
+        decision_timeout_seconds=telegram_cfg.get(
+            "decision_timeout_seconds", 1800
+        ),
+        sound_enabled=approval_cfg.get("sound", True),
+        sound_file=approval_cfg.get("sound_file", ""),
+        notify_telegram=approval_cfg.get("notify_telegram", True),
+        notify_chat_id=(
+            telegram_cfg.get("notify_chat_id")
+            or (approval_cfg.get("notify_chat_id") or None)
+        ),
+    )
+    if dry_run:
+        decision = gateway.auto_approve(post_id)
+    else:
+        decision = gateway.request_approval(
+            post_id, str(clip_path), caption, media_kind="video"
+        )
+    logger.info("Approval decision: %s", decision)
+
+    action = decision.get("action")
+    if action == "retry":
+        logger.info("Regeneration requested; re-run --reel-produce then publish.")
+        db.transition(post_id, "AWAITING_APPROVAL")
+        return 0
+    if action == "discard":
+        logger.info("Reel discarded by human.")
+        db.transition(post_id, "REJECTED")
+        return 0
+    if action == "timeout":
+        logger.warning("Approval timed out; leaving reel post pending.")
+        return 0
+
+    if not dry_run and not db.transition(post_id, "APPROVED"):
+        logger.error("Reel post %d could not enter APPROVED", post_id)
+        return 1
+
+    publisher = MetaPublisher(
+        access_token=meta_cfg.get("access_token", ""),
+        instagram_user_id=meta_cfg.get("instagram_user_id", ""),
+        api_version=meta_cfg.get("api_version", "v21.0"),
+        graph_base_url=meta_cfg.get(
+            "graph_base_url", "https://graph.facebook.com"
+        ),
+        dry_run=dry_run or meta_cfg.get("dry_run", True),
+    )
+
+    try:
+        if publisher.dry_run:
+            logger.info("would create Reel container for %s", brief.brief_id)
+            video_url = ""
+        else:
+            host = build_media_host(config.get("vault", {}))
+            if not host.is_configured():
+                raise MetaPublisherError(
+                    "vault host not configured; cannot host the clip for Meta "
+                    "(set vault.host.backend to r2/s3)"
+                )
+            video_url = host.upload(str(clip_path))
+            logger.info("Clip hosted at %s", video_url)
+
+        container_id = publisher.create_reel_container(
+            video_url,
+            caption,
+            share_to_feed=share_to_feed,
+            brief_id=brief.brief_id,
+        )
+        db.set_publishing_result(post_id, ig_container_id=container_id)
+        logger.info("Reel container: %s", container_id)
+
+        publisher.wait_for_container(container_id)
+        media_id = publisher.publish_container(container_id)
+        db.set_publishing_result(post_id, ig_media_id=media_id)
+        logger.info("Published Reel media id: %s", media_id)
+    except MetaPublisherError as exc:
+        logger.error("Reel publish failed: %s", exc)
+        db.transition(post_id, "FAILED")
+        db.set_publishing_result(post_id, meta_error=str(exc))
+        return 1
+
+    if not db.transition(post_id, "PUBLISHED"):
+        logger.error("Reel post %d could not enter PUBLISHED", post_id)
+        return 1
+    db.set_publishing_result(post_id, meta_error=None)
+    logger.info("Reel pipeline complete for brief %s (post %d)", brief.brief_id, post_id)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Exotic Shorthair Instagram content pipeline"
@@ -1326,6 +1572,23 @@ def main(argv: list[str] | None = None) -> int:
         help="Drive the assisted browser producer to generate any missing clips "
         "for a set (--set) and download them under each brief's expected name",
     )
+    parser.add_argument(
+        "--reel-validate",
+        action="store_true",
+        help="Validate a produced clip (--set + --brief) against the clip "
+        "contract and print the report, then exit",
+    )
+    parser.add_argument(
+        "--reel-publish",
+        action="store_true",
+        help="Validate, approval-gate and publish a Reel (--set + --brief); "
+        "deduplicated by brief id. Use --dry-run for a hermetic run",
+    )
+    parser.add_argument(
+        "--brief",
+        default=None,
+        help="Brief id (e.g. parallel_lives:0) for --reel-validate/--reel-publish",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -1355,6 +1618,18 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--reel-produce requires --set")
             return 2
         return run_reel_produce(cfg, args.set_key)
+    if args.reel_validate:
+        if not args.set_key or not args.brief:
+            parser.error("--reel-validate requires --set and --brief")
+            return 2
+        return run_reel_validate(cfg, args.set_key, args.brief)
+    if args.reel_publish:
+        if not args.set_key or not args.brief:
+            parser.error("--reel-publish requires --set and --brief")
+            return 2
+        return run_reel_publish(
+            cfg, args.set_key, args.brief, dry_run=args.dry_run
+        )
     if args.retry:
         if not args.post_id:
             parser.error("--retry requires --post-id")

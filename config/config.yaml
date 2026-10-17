@@ -114,3 +114,5 @@ reel:
   publish:
     # Also surface the Reel in the account feed (Meta `share_to_feed`)
     share_to_feed: true
+    # FR-016: mandatory AI-generated disclosure appended to every Reel caption
+    disclosure: "This Reel was generated with AI image-to-video from a real photo of our cat."

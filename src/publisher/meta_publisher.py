@@ -14,11 +14,16 @@ video/Reel support can be added without affecting the image path.
 """
 
 import logging
+import time
 from pathlib import Path
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+# Terminal status code for a finished Reel container.
+STATUS_FINISHED = "FINISHED"
+STATUS_ERROR = "ERROR"
 
 
 class MetaPublisherError(RuntimeError):
@@ -94,6 +99,122 @@ class MetaPublisher:
             return self._parse_container_id(resp)
         except requests.exceptions.RequestException as exc:
             raise MetaPublisherError(f"Media container request failed: {exc}")
+
+    def create_reel_container(
+        self,
+        video_url: str,
+        caption: str,
+        *,
+        share_to_feed: bool = True,
+        brief_id: str = "",
+    ) -> str:
+        """Create a Reel container (`media_type=REELS`) from a public video URL.
+
+        Unlike images, the returned container must be polled with
+        `wait_for_container` until processing finishes before publishing.
+        Returns the container id.
+        """
+        if self.dry_run:
+            logger.info(
+                "DRY-RUN: would create Reel container for %s", video_url
+            )
+            label = brief_id or Path(video_url).stem
+            return f"container_dry_{label}"
+
+        if not self.is_configured():
+            raise MetaPublisherError(
+                "MetaPublisher is not configured: missing access_token "
+                "or instagram_user_id. Set config/meta.* or enable dry_run."
+            )
+
+        params = {
+            "media_type": "REELS",
+            "video_url": video_url,
+            "caption": caption,
+            "share_to_feed": str(bool(share_to_feed)).lower(),
+            "access_token": self.access_token,
+        }
+        try:
+            resp = requests.post(
+                self._url(f"{self.instagram_user_id}/media"),
+                params=params,
+                headers=self._headers(),
+                timeout=60,
+            )
+            return self._parse_container_id(resp)
+        except requests.exceptions.RequestException as exc:
+            raise MetaPublisherError(f"Reel container request failed: {exc}")
+
+    def wait_for_container(
+        self,
+        container_id: str,
+        *,
+        timeout_seconds: int = 300,
+        poll_interval: float = 5.0,
+        sleep=time.sleep,
+    ) -> str:
+        """Poll a Reel container until it is `FINISHED` (bounded).
+
+        Raises `MetaPublisherError` on `ERROR`, a malformed response, or timeout.
+        In dry-run, returns `FINISHED` immediately without any request.
+        """
+        if self.dry_run:
+            logger.info(
+                "DRY-RUN: skipping status poll for container %s", container_id
+            )
+            return STATUS_FINISHED
+
+        if not self.is_configured():
+            raise MetaPublisherError(
+                "MetaPublisher is not configured: missing access_token "
+                "or instagram_user_id. Set config/meta.* or enable dry_run."
+            )
+
+        deadline = time.monotonic() + timeout_seconds
+        last_status = ""
+        while True:
+            try:
+                resp = requests.get(
+                    self._url(container_id),
+                    params={
+                        "fields": "status_code,status",
+                        "access_token": self.access_token,
+                    },
+                    headers=self._headers(),
+                    timeout=60,
+                )
+            except requests.exceptions.RequestException as exc:
+                raise MetaPublisherError(
+                    f"container status request failed: {exc}"
+                )
+            try:
+                data = resp.json()
+            except ValueError:
+                raise MetaPublisherError(
+                    f"container status non-JSON response: "
+                    f"{resp.status_code} {resp.text[:200]}"
+                )
+            if not resp.ok and "status_code" not in data:
+                raise MetaPublisherError(
+                    f"container status request failed: "
+                    f"{resp.status_code} {data}"
+                )
+
+            status_code = data.get("status_code")
+            last_status = status_code or last_status
+            if status_code == STATUS_FINISHED:
+                return STATUS_FINISHED
+            if status_code == STATUS_ERROR:
+                raise MetaPublisherError(
+                    f"container {container_id} processing failed: "
+                    f"{data.get('status', 'unknown error')}"
+                )
+            if time.monotonic() >= deadline:
+                raise MetaPublisherError(
+                    f"timed out waiting for container {container_id} to finish "
+                    f"(last status: {last_status or 'unknown'})"
+                )
+            sleep(poll_interval)
 
     def publish_container(self, container_id: str) -> str:
         """Publish a previously created container. Returns the media id."""

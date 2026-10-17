@@ -136,7 +136,12 @@ class TelegramGateway:
         return {"action": "approve", "source": "auto"}
 
     async def _request_via_telegram(
-        self, post_id: int, media_path: str, caption: str
+        self,
+        post_id: int,
+        media_path: str,
+        caption: str,
+        *,
+        media_kind: str = "image",
     ) -> dict:
         application = (
             Application.builder()
@@ -166,26 +171,37 @@ class TelegramGateway:
             )
 
             bot: Bot = application.bot
-            message = await bot.send_photo(
-                chat_id=next(iter(self.allowed_chat_ids)),
-                photo=Path(media_path).as_posix(),
-                caption=caption,
-                reply_markup=InlineKeyboardMarkup(
+            keypad = InlineKeyboardMarkup(
+                [
                     [
-                        [
-                            InlineKeyboardButton(
-                                "Approve & Schedule", callback_data="approve"
-                            ),
-                            InlineKeyboardButton(
-                                "Regenerate", callback_data="retry"
-                            ),
-                            InlineKeyboardButton(
-                                "Discard", callback_data="discard"
-                            ),
-                        ]
+                        InlineKeyboardButton(
+                            "Approve & Schedule", callback_data="approve"
+                        ),
+                        InlineKeyboardButton(
+                            "Regenerate", callback_data="retry"
+                        ),
+                        InlineKeyboardButton(
+                            "Discard", callback_data="discard"
+                        ),
                     ]
-                ),
+                ]
             )
+            chat_id = next(iter(self.allowed_chat_ids))
+            if media_kind == "video":
+                message = await bot.send_video(
+                    chat_id=chat_id,
+                    video=Path(media_path).as_posix(),
+                    caption=caption,
+                    reply_markup=keypad,
+                    supports_streaming=True,
+                )
+            else:
+                message = await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=Path(media_path).as_posix(),
+                    caption=caption,
+                    reply_markup=keypad,
+                )
             # Poll for a decision
             deadline = datetime.now(UTC).timestamp() + self.timeout
             decision = None
@@ -219,10 +235,19 @@ class TelegramGateway:
                 return {"action": "timeout", "source": "telegram"}
             return {"action": decision, "source": "telegram"}
 
-    def request_approval(self, post_id: int, media_path: str, caption: str) -> dict:
+    def request_approval(
+        self,
+        post_id: int,
+        media_path: str,
+        caption: str,
+        *,
+        media_kind: str = "image",
+    ) -> dict:
         """Ask for human approval for the given post.
 
-        Returns {'action': 'approve'|'retry'|'discard'|'timeout', ...}.
+        `media_kind` selects the Telegram preview type (`"image"` sends a
+        photo, `"video"` sends a playable video). Returns
+        {'action': 'approve'|'retry'|'discard'|'timeout', ...}.
         """
         self._alert_operator(post_id)
         if not self.available:
@@ -241,7 +266,9 @@ class TelegramGateway:
 
         try:
             decision = asyncio.run(
-                self._request_via_telegram(post_id, media_path, caption)
+                self._request_via_telegram(
+                    post_id, media_path, caption, media_kind=media_kind
+                )
             )
         except TelegramError as exc:
             self._fallback_reason = f"Telegram failed ({exc}); using CLI approval."
