@@ -84,3 +84,6 @@ creative:
   generator_script: "src/generator/run_generate.py"
   model: "Lykon/dreamshaper-8"
   steps: 24
+  # Default render recipe (per-set values in sets.json override these)
+  mode: "text2img"
+  cfg: 8.0

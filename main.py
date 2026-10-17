@@ -1071,6 +1071,7 @@ def run_generate_set(config: dict, set_key: str, *, shots: int | None = None) ->
     )
     gen_script = creative.get("generator_script", "src/generator/run_generate.py")
     steps = int(creative.get("steps", 24))
+    default_cfg = creative.get("cfg", 8.0)
 
     if not Path(gen_env_python).exists():
         logger.error("Generator python not found at %s", gen_env_python)
@@ -1084,33 +1085,36 @@ def run_generate_set(config: dict, set_key: str, *, shots: int | None = None) ->
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
 
     for shot in plan:
-        pool = pools.get(shot["cat"])
-        if not pool:
-            logger.error(
-                "No anchor pool for '%s'; did --label-vault run?", shot["cat"]
-            )
-            continue
-        anchor = anchor_for_shot(pool, shot["index"])
+        mode = set_cfg.get("mode", creative.get("mode", "text2img"))
         out_file = out_dir / f"img_{shot['index']:02d}.png"
+        anchor = None
+        if mode == "img2img":
+            pool = pools.get(shot["cat"])
+            if not pool:
+                logger.error(
+                    "No anchor pool for '%s'; did --label-vault run?",
+                    shot["cat"],
+                )
+                continue
+            anchor = anchor_for_shot(pool, shot["index"])
         if out_file.exists():
-            logger.info(
-                "Shot %d already rendered; skipping", shot["index"]
-            )
+            logger.info("Shot %d already rendered; skipping", shot["index"])
             ok += 1
             manifest.append(
                 {
                     **shot,
-                    "anchor_id": anchor["vault_media_id"],
+                    "anchor_id": anchor["vault_media_id"] if anchor else None,
                     "out": str(out_file),
                 }
             )
             continue
 
         logger.info(
-            "Rendering shot %d (%s, anchor #%d): %s",
+            "Rendering shot %d (%s, %s%s): %s",
             shot["index"],
             shot["cat"],
-            anchor["vault_media_id"],
+            mode,
+            f", anchor #{anchor['vault_media_id']}" if anchor else "",
             shot["scene"],
         )
         cmd = [
@@ -1119,13 +1123,15 @@ def run_generate_set(config: dict, set_key: str, *, shots: int | None = None) ->
             "utf8",
             gen_script,
             "--mode",
-            "img2img",
+            mode,
             "--prompt",
             shot["image_prompt"],
             "--negative",
             shot.get("negative", ""),
-            "--ref",
-            anchor["path"],
+        ]
+        if anchor:
+            cmd += ["--ref", anchor["path"], "--zoom", str(1.25)]
+        cmd += [
             "--out",
             str(out_file),
             "--steps",
@@ -1134,6 +1140,8 @@ def run_generate_set(config: dict, set_key: str, *, shots: int | None = None) ->
             str(shot["denoise"]),
             "--seed",
             str(shot["seed"]),
+            "--cfg",
+            str(set_cfg.get("cfg", default_cfg)),
         ]
         proc = subprocess.run(
             cmd,
@@ -1171,15 +1179,20 @@ def run_generate_set(config: dict, set_key: str, *, shots: int | None = None) ->
 
     lines = [f"# {set_cfg.get('name', set_key)}", ""]
     for m in manifest:
-        lines += [
-            f"## Shot {m['index']} - {m['cat']}",
-            f"anchor: #{m['anchor_id']}",
-            f"file: `{m['out']}`",
-            f"prompt: {m['image_prompt']}",
-            f"caption: {m['caption']}",
-            f"reel: {m['reel_text']}",
-            "",
-        ]
+        anchor_line = (
+            [f"anchor: #{m['anchor_id']}"] if m.get("anchor_id") else []
+        )
+        lines += (
+            [f"## Shot {m['index']} - {m['cat']}"]
+            + anchor_line
+            + [
+                f"file: `{m['out']}`",
+                f"prompt: {m['image_prompt']}",
+                f"caption: {m['caption']}",
+                f"reel: {m['reel_text']}",
+                "",
+            ]
+        )
     (out_dir / "digest.md").write_text("\n".join(lines), encoding="utf-8")
     logger.info(
         "Set '%s': %d/%d rendered; digest at %s",

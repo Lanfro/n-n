@@ -31,8 +31,8 @@ SHOT_INSTRUCTION = (
     '"caption": "<caption>", '
     '"reel": "<3-7 word hook>", '
     '"hashtags": ["tag1", "tag2", ...]}}\n'
-    "The prompt must faithfully describe {name} as: {descriptor}. "
-    "The prompt must depict this scene: {scene}. "
+    "The prompt MUST begin with this exact opening: {descriptor}. "
+    "Then continue by depicting this scene: {scene}. "
     "Style: {style}. One single main subject, vertical 4:5 portrait, "
     "photorealistic keywords, no text or letters, no watermark.\n"
     "The caption must be a NEW short text (at most 3 sentences) written "

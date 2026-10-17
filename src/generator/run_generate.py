@@ -34,6 +34,17 @@ def _emit(msg: str) -> None:
     print(msg, flush=True)
 
 
+def _prep_ref(path: str, px: int, zoom: float):
+    """Zoom the center crop before squaring so the subject fills more frame."""
+    img = prep_square(path, px * 8)
+    if zoom > 1.0:
+        side = int(px * 8 / zoom)
+        left = (img.width - side) // 2
+        top = (img.height - side) // 2
+        img = img.crop((left, top, left + side, top + side))
+    return img.resize((px, px))
+
+
 def _progress(pipe, step_index, timestep, callback_kwargs):
     _emit(f"STEP {step_index}")
     return callback_kwargs
@@ -41,6 +52,7 @@ def _progress(pipe, step_index, timestep, callback_kwargs):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--model", default=MODEL)
     ap.add_argument("--mode", choices=["text2img", "img2img"], required=True)
     ap.add_argument("--prompt", required=True)
     ap.add_argument("--negative", default="")
@@ -50,6 +62,11 @@ def main() -> None:
     ap.add_argument("--denoise", type=float, default=0.45)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--size", type=int, default=512)
+    ap.add_argument("--cfg", type=float, default=None,
+                    help="guidance scale; defaults to the model default (7)")
+    ap.add_argument("--zoom", type=float, default=1.0,
+                    help="img2img only: zoom the center crop before "
+                         "squaring (>=1.0), so the subject fills more frame")
     args = ap.parse_args()
 
     t0 = time.time()
@@ -72,10 +89,15 @@ def main() -> None:
         "callback_on_step_end": _progress,
     }
     if args.mode == "img2img":
-        kwargs.update(image=prep_square(args.ref, args.size),
-                      strength=args.denoise)
+        zoom = max(1.0, args.zoom)
+        kwargs.update(
+            image=_prep_ref(args.ref, args.size, zoom),
+            strength=args.denoise,
+        )
     else:
         kwargs.update(width=args.size, height=args.size)
+    if args.cfg:
+        kwargs["guidance_scale"] = args.cfg
 
     img = pipe(**kwargs).images[0]
     t_gen = time.time() - t1
