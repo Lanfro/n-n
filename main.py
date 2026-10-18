@@ -1359,15 +1359,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--reel-produce",
         action="store_true",
-        help="Drive the assisted browser producer to generate any missing clips "
-        "for a set (--set) and download them under each brief's expected name",
+        help="Generate any missing clips for a set (--set) via the configured "
+        "provider (reel.provider: 'api' or 'browser') and save them under each "
+        "brief's expected name",
     )
     parser.add_argument(
         "--reel-login",
         action="store_true",
         help="Open the persistent browser so the operator can sign in to the "
-        "video service once; waits until the session is authenticated, then "
-        "exits (needed before --reel-produce)",
+        "video service once (browser provider only; the api provider needs just "
+        "an API key). Waits until the session is authenticated, then exits",
     )
     parser.add_argument(
         "--reel-validate",

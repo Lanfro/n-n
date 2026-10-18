@@ -38,7 +38,8 @@ cat-agent-instagram/
 │   ├── reel/                   # AI Video Reel pipeline (briefs, assisted production, validation)
 │   │   ├── brief.py            # Creative set + vault anchors -> self-contained reel briefs
 │   │   ├── anchors.py          # "keep the last 10" vault anchor pools
-│   │   ├── producer.py         # Playwright-driven external image-to-video service (never IG)
+│   │   ├── producer.py         # Assisted Playwright producer (opt-in; never IG)
+│   │   ├── api_producer.py     # Official image-to-video HTTP API (default; no browser)
 │   │   ├── validator.py        # ffprobe validation + allowed ffmpeg repairs
 │   │   └── models.py           # ReelBrief / ClipReport / BrowserSessionState
 │   ├── approval/
@@ -146,11 +147,16 @@ Reels through the official Graph API, always behind the `APPROVED` gate.
                    logged_in marker matches); cookies are reused afterwards.
               │
               ▼
-[ --reel-produce --set <key> ]  assisted Playwright session on a FREE external
-                                service (PixVerse) uploads each brief's source
-                                photo, applies the motion prompt, downloads the
-                                clip as expected_output. Skips clips already
-                                present; pauses + alerts on challenge/limit.
+[ --reel-produce --set <key> ]  generate each missing clip per
+                                `reel.provider`:
+                                - "api" (default): official image-to-video HTTP
+                                  API (fal.ai/Replicate) sends the source photo
+                                  inline and downloads the clip. No browser/login.
+                                - "browser" (opt-in): assisted Playwright session
+                                  on the FREE external service (PixVerse) uploads
+                                  the photo, applies the prompt and downloads.
+                                Either way it skips clips already present and
+                                pauses + alerts on auth/limit/faults.
               │
               ▼
 [ --reel-validate --set <key> --brief <id> ]  ffprobe report; repairs (silent
@@ -165,10 +171,12 @@ Reels through the official Graph API, always behind the `APPROVED` gate.
 ```
 
 Notes:
-- The browser step targets the external video service only; Instagram is never
-  touched by automation (Constitution I).
-- Clip validation/repair requires `ffmpeg`/`ffprobe`; assisted production needs
-  `uv run playwright install chromium` and a one-time sign-in via
-  `uv run main.py --reel-login`.
+- The browser provider (`reel.provider: browser`) targets the external video
+  service only; Instagram is never touched by automation (Constitution I). The
+  default `api` provider uses no browser at all.
+- Clip validation/repair requires `ffmpeg`/`ffprobe`; the `api` provider needs
+  an API key (`reel.api.api_key` or `FAL_KEY`/`REPLICATE_API_TOKEN`); the
+  `browser` provider needs `uv run playwright install chromium` and a one-time
+  sign-in via `uv run main.py --reel-login`.
 - The publish-time clip URL comes from R2/S3 (`src/vault/media_host.py`), never
   the vault.

@@ -822,9 +822,17 @@ def produce_set(
     alerter: Callable[[str], None] | None = None,
     driver_factory: Callable[[], Any] | None = None,
 ) -> ProduceResult:
-    """Load a set's briefs and produce any missing clips (assisted)."""
+    """Load a set's briefs and produce any missing clips (assisted).
+
+    The generation provider is chosen by ``reel.provider``:
+
+    * ``browser`` (default) - the assisted Playwright/PixVerse session.
+    * ``api``               - the official HTTP image-to-video API
+      (:mod:`src.reel.api_producer`), which needs no browser or login.
+    """
     creative = config.get("creative", {})
     reel_cfg = config.get("reel", {})
+    provider = str(reel_cfg.get("provider", "browser")).strip().lower()
     out_dir = Path(creative.get("out_root", "data/generated")) / set_key
     briefs = load_briefs(out_dir)
     if not briefs:
@@ -843,6 +851,15 @@ def produce_set(
         "aspect": reel_cfg.get("aspect", ""),
         "duration": reel_cfg.get("duration_seconds", ""),
     }
+    if driver_factory is None and provider == "api":
+        from .api_producer import ApiDriver
+
+        poll_seconds = float(
+            (reel_cfg.get("api", {}) or {}).get("poll_interval_seconds", 5)
+        )
+
+        def driver_factory() -> Any:
+            return ApiDriver(config=config, poll_interval_seconds=poll_seconds)
     producer = ReelProducer(
         selectors=selectors,
         profile_dir=reel_cfg.get("browser_profile_dir", "data/.browser/reel"),
@@ -857,7 +874,7 @@ def produce_set(
         "Producing %d brief(s) for set '%s' via %s",
         len(briefs),
         set_key,
-        selectors.service,
+        provider if provider != "browser" else selectors.service,
     )
     result = producer.produce(briefs, out_dir)
     logger.info(
@@ -883,8 +900,16 @@ def login_session(
     Loads the reel config, then returns the session state once the sign-in is
     confirmed (``authenticated``), the window is closed (``logged_out``) or the
     wait times out (last observed state).
+
+    When ``reel.provider`` is ``api`` there is no browser login; the state
+    reflects whether an API key is configured.
     """
     reel_cfg = config.get("reel", {})
+    provider = str(reel_cfg.get("provider", "browser")).strip().lower()
+    if provider == "api":
+        from .api_producer import api_login_state
+
+        return api_login_state(config)
     selectors = load_selectors(
         reel_cfg.get("selectors_path", "config/reel/selectors.json")
     )

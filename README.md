@@ -68,16 +68,22 @@ Copy `config/config.yaml` to `config/config.local.yaml` and fill in:
 - `telegram.bot_token` / `telegram.allowed_chat_ids` (+ `notify_chat_id`)
 - `vault.telegram.bot_token` / `vault.telegram.chat_id` (dedicated vault bot)
 - `vault.host.kind` (`r2`, `s3`, or `none`) + bucket/credentials/`public_base_url`
-- `reel.*` (external service URL, browser profile, clip bounds, `reel.publish.share_to_feed`/`disclosure`)
+- `reel.*` (clip bounds, `reel.publish.share_to_feed`/`disclosure`); clip
+  generation defaults to `reel.provider: api` — set `reel.api.backend`
+  (`fal`/`replicate`), an API key (`reel.api.api_key` or `FAL_KEY` /
+  `REPLICATE_API_TOKEN`) and optionally `reel.api.model`. Set
+  `reel.provider: browser` to use the opt-in assisted PixVerse session instead
+  (`service_url`, `browser_profile_dir`).
 
 Config values in `config/config.local.yaml` override the defaults; the file is
 gitignored.
 
 ## Safety
 
-- No browser scrapers or unofficial IG libraries. Graph API only for Instagram;
-  the one browser exception is the assisted image-to-video step, which targets a
-  free **external** service (never Instagram).
+- No browser scrapers or unofficial IG libraries. Graph API only for Instagram.
+  Clip generation defaults to an official image-to-video HTTP API (no browser);
+  the opt-in browser provider targets a free **external** service and never
+  Instagram.
 - Publishing requires explicit human approval (Telegram or CLI); a sound +
   Telegram alert fires when a human decision is pending.
 - No content reaches Instagram without approval (`APPROVED` gate).

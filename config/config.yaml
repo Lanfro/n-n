@@ -83,6 +83,11 @@ creative:
 # assisted browser session on a free third-party service, then publish as Reels
 # through the official Meta Graph API after human approval.
 reel:
+  # How clips are generated:
+  #   "api"     - the official HTTP image-to-video API (no browser, no login,
+  #               no selectors; see the reel.api block below). Recommended.
+  #   "browser" - the assisted Playwright session on a free service (PixVerse).
+  provider: "api"
   # External image-to-video service (browser-driven; never Instagram)
   service: "pixverse"
   service_url: "https://app.pixverse.ai"
@@ -107,6 +112,28 @@ reel:
   # 5-90 s to appear in the Reels tab (preferred floor)
   preferred_min_duration_seconds: 5
   max_size_mb: 300
+  # Official image-to-video API provider (used when provider: "api").
+  api:
+    # Backend adapter: "fal" (fal.ai) or "replicate" (Replicate).
+    backend: "fal"
+    # Endpoint/model id for the chosen backend. Leave empty for the built-in
+    # default. The source photo is sent inline as a base64 data URI, so the
+    # image needs no public hosting.
+    #   fal:       fal-ai/wan/v2.2-a14b/image-to-video   (Wan 2.2, Apache-2.0)
+    #              fal-ai/kling-video/v1.6/standard/image-to-video
+    #   replicate: wan-video/wan-2.2-i2v-fast
+    model: ""
+    # API key. Prefer an env var (see api_key_env) to keep it out of files;
+    # an explicit value here overrides the env var.
+    api_key: ""
+    api_key_env: ""  # default: FAL_KEY / REPLICATE_API_TOKEN
+    # Optional base-URL override (advanced/testing)
+    base_url: ""
+    # Seconds between status polls while a clip renders
+    poll_interval_seconds: 5
+    # Extra model parameters, merged into the request payload verbatim
+    # (e.g. {resolution: "540p", duration: 5, aspect_ratio: "9:16"})
+    params: {}
   publish:
     # Also surface the Reel in the account feed (Meta `share_to_feed`)
     share_to_feed: true

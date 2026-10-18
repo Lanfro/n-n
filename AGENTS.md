@@ -24,9 +24,11 @@ rules without being asked.
 - Never log or commit secrets; credentials live only in the gitignored
   `config/config.local.yaml`.
 - Official Meta Graph API only — no browser automation or unofficial IG
-  libraries **against Instagram**. The one browser exception is the assisted
-  image-to-video step (`src/reel/producer.py`, Playwright) which targets a
-  free **external** service (PixVerse), never Instagram.
+  libraries **against Instagram**. Clip generation defaults to an official
+  image-to-video **HTTP API** (`src/reel/api_producer.py`: fal.ai/Replicate; no
+  browser, no login). The browser-assisted path (`src/reel/producer.py`,
+  Playwright on the free **external** service PixVerse) is opt-in
+  (`reel.provider: browser`) and never touches Instagram.
 - Nothing publishes without human approval (status-machine `APPROVED` gate).
 - When a human decision is required: play the alert sound and send the
   Telegram notification (see `src/approval/`), then wait for input.
@@ -38,10 +40,13 @@ rules without being asked.
   `--reel-plan --set <key>`, `--reel-login`, `--reel-produce --set <key>`,
   `--reel-validate --set <key> --brief <id>`,
   `--reel-publish --set <key> --brief <id> [--dry-run]`.
-- Clip validation/repair needs `ffmpeg`/`ffprobe` on `PATH`; assisted
-  production needs `uv run playwright install chromium` and a one-time sign-in
-  via `--reel-login` (the operator authenticates in the persistent profile
-  window, never via automation against Instagram).
+- Clip validation/repair needs `ffmpeg`/`ffprobe` on `PATH`. The default API
+  provider needs only an API key (`reel.api.api_key`, or `FAL_KEY` /
+  `REPLICATE_API_TOKEN` in the environment). The opt-in browser provider
+  (`reel.provider: browser`) additionally needs
+  `uv run playwright install chromium` and a one-time sign-in via `--reel-login`
+  (the operator authenticates in the persistent profile window, never via
+  automation against Instagram).
 
 ## Environment notes (Windows / PowerShell)
 
