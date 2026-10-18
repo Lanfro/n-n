@@ -465,3 +465,79 @@ def test_guard_pauses_the_batch_when_credits_are_insufficient():
     with pytest.raises(BrowserPaused) as exc:
         _paywall_driver()._guard()
     assert exc.value.state == SESSION_LIMIT_REACHED
+
+
+class _FakeInput:
+    def __init__(self, page, index):
+        self.page = page
+        self.index = index
+
+    def set_input_files(self, path):
+        self.page.uploads.append((self.index, path))
+        if self.index in self.page.attach_indexes:
+            self.page.previews += 1
+
+
+class _UploadPage:
+    """Two file inputs; only ``attach_indexes`` actually attach an image."""
+
+    def __init__(self, *, count=2, attach_indexes=(1,)):
+        self.inputs = [_FakeInput(self, i) for i in range(count)]
+        self.attach_indexes = set(attach_indexes)
+        self.uploads: list[tuple[int, str]] = []
+        self.previews = 0
+
+    def query_selector_all(self, _sel):
+        return list(self.inputs)
+
+    def evaluate(self, _js):
+        return self.previews
+
+
+def test_upload_source_tries_each_input_until_a_preview_appears():
+    page = _UploadPage(count=2, attach_indexes=(1,))
+    drv = _driver(page)
+    drv._upload_source("photo.jpg", timeout_seconds=0.1)
+    assert [i for i, _ in page.uploads] == [0, 1]
+
+
+def test_upload_source_pauses_when_no_input_attaches():
+    from src.reel.producer import UNEXPECTED_UI
+
+    page = _UploadPage(count=2, attach_indexes=())
+    drv = _driver(page)
+    with pytest.raises(BrowserPaused) as exc:
+        drv._upload_source("photo.jpg", timeout_seconds=0)
+    assert exc.value.state == UNEXPECTED_UI
+
+
+class _ModePage:
+    """Answers the mode-switcher JS probe and records clicks."""
+
+    def __init__(self, *, box=(1.0, 2.0)):
+        self.box = box
+        self.mouse = self
+        self.calls: list[object] = []
+        self.clicks: list[tuple[float, float]] = []
+
+    def evaluate(self, _js, arg=None):
+        self.calls.append(arg)
+        return list(self.box) if self.box else None
+
+    def click(self, x, y):
+        self.clicks.append((x, y))
+
+
+def test_select_mode_clicks_the_video_switcher_item():
+    page = _ModePage(box=(244.0, 499.0))
+    drv = _driver(page)
+    assert drv._select_mode("Video") is True
+    assert page.calls == ["Video"]
+    assert page.clicks == [(244.0, 499.0)]
+
+
+def test_select_mode_is_best_effort_when_the_switcher_is_absent():
+    page = _ModePage(box=None)
+    drv = _driver(page)
+    assert drv._select_mode("Video") is False
+    assert page.clicks == []

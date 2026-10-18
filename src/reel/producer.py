@@ -62,6 +62,47 @@ _CLICK_TEXT_JS = r"""
 }
 """
 
+# JS: count visible "attached image" previews (a blob thumbnail, or a small
+# uploaded thumbnail). Used to confirm a photo actually attached before
+# generating - PixVerse keeps two file inputs and only one attaches.
+_PREVIEW_COUNT_JS = r"""
+() => {
+  const vis = (el) => { const r = el.getBoundingClientRect();
+    const st = window.getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden'
+      && st.display !== 'none'; };
+  let n = 0;
+  for (const el of document.querySelectorAll('img')) {
+    if (!vis(el)) continue;
+    const s = el.getAttribute('src') || '';
+    const r = el.getBoundingClientRect();
+    if (s.startsWith('blob:') || (s.includes('/upload/') && r.width <= 130)) n++;
+  }
+  return n;
+}
+"""
+
+# JS: centre of the generation-mode switcher item (Video/Image/Audio) whose
+# text equals `arg[0]`. The switcher labels carry the class
+# "z-10 absolute left-0 text-xs"; the same words also appear as top-level tabs
+# (class "z-[1] ...") and as gallery cards, so the class filter disambiguates.
+_SWITCH_MODE_JS = r"""
+(text) => {
+  const vis = (el) => { const r = el.getBoundingClientRect();
+    const st = window.getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden'
+      && st.display !== 'none'; };
+  for (const el of document.querySelectorAll('div, span, button')) {
+    if (!vis(el)) continue;
+    if ((el.innerText || '').trim() !== text) continue;
+    if (!/z-10 absolute left-0/.test(el.getAttribute('class') || '')) continue;
+    const r = el.getBoundingClientRect();
+    return [r.x + r.width / 2, r.y + r.height / 2];
+  }
+  return null;
+}
+"""
+
 # JS: centre of the resolution token ("540P") that opens the settings popover.
 _OPEN_SETTINGS_JS = r"""
 () => {
@@ -297,6 +338,60 @@ class PlaywrightDriver:
 
     # -- create-settings popover ----------------------------------------
 
+    def _preview_count(self) -> int:
+        try:
+            return int(self.page.evaluate(_PREVIEW_COUNT_JS))
+        except Exception:  # noqa: BLE001 - page churn during upload
+            return 0
+
+    def _select_mode(self, mode: str = "Video") -> bool:
+        """Select the generation-mode switcher item (default "Video").
+
+        The create page remembers the last mode; leaving "Image" selected turns
+        the job into text-to-image/edit. Best effort: when the switcher cannot
+        be found we keep whatever is selected (the validator still rejects any
+        clip that misses the bounds).
+        """
+        try:
+            box = self.page.evaluate(_SWITCH_MODE_JS, mode)
+        except Exception as exc:  # noqa: BLE001 - page churn during load
+            logger.debug("Could not read the mode switcher: %s", exc)
+            return False
+        if not box:
+            logger.debug("Mode switcher item %r not found", mode)
+            return False
+        self.page.mouse.click(box[0], box[1])
+        time.sleep(1.0)
+        return True
+
+    def _upload_source(self, photo: str, *, timeout_seconds: float = 10.0) -> None:
+        """Attach the source photo, trying each file input until one registers.
+
+        The create page exposes two ``input[type=file]`` elements but only one
+        actually attaches an image; setting the wrong one silently leaves the
+        job as text-to-video (a generic cat), so we confirm an image preview
+        appeared and otherwise try the next input.
+        """
+        inputs = self.page.query_selector_all("input[type=file]")
+        if not inputs:
+            raise BrowserPaused(UNEXPECTED_UI, "no file input on the create page")
+        baseline = self._preview_count()
+        for idx, element in enumerate(inputs):
+            try:
+                element.set_input_files(photo)
+            except Exception as exc:  # noqa: BLE001 - try the next input
+                logger.debug("File input %d refused the photo: %s", idx, exc)
+                continue
+            deadline = time.monotonic() + timeout_seconds
+            while time.monotonic() < deadline:
+                if self._preview_count() > baseline:
+                    logger.debug("Source photo attached via file input %d", idx)
+                    return
+                time.sleep(0.5)
+        raise BrowserPaused(
+            UNEXPECTED_UI, "source photo did not attach to any file input"
+        )
+
     @staticmethod
     def _setting_options(settings: dict | None) -> list[str]:
         """Popover option labels to pick, in order (empty when unset)."""
@@ -360,8 +455,8 @@ class PlaywrightDriver:
         self._guard()
 
         try:
-            upload = self._require("upload_input", "upload", require_visible=False)
-            upload.set_input_files(brief.source_photo_path)
+            self._select_mode("Video")
+            self._upload_source(brief.source_photo_path)
 
             prompt = self._require("prompt_field", "prompt")
             prompt.fill(brief.motion_prompt)
