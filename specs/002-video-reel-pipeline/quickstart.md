@@ -83,8 +83,11 @@ is regenerated.
 
 **Expected (blocked)**: on a login/anti-bot challenge or exhausted daily
 allowance, an operator alert fires (sound + Telegram) within one minute, the run
-pauses cleanly, and previously produced clips remain. Drop the clip in by hand
-under `expected_output` and re-run to confirm it is treated as produced.
+pauses cleanly, and previously produced clips remain. The paid service's
+"Insufficient Credits" paywall is treated the same way (`limit_reached`, exit
+`3`); each 5s 540P clip costs credits, so top up or wait for the daily reset.
+Drop the clip in by hand under `expected_output` and re-run to confirm it is
+treated as produced.
 
 **Proves**: FR-005, FR-007, FR-008, FR-009, SC-003, SC-006,
 [video-service-browser.md](contracts/video-service-browser.md).
@@ -166,10 +169,10 @@ clips, Reels publisher with mocked HTTP, browser producer with mocked Playwright
 | 1 | Plan briefs (`--reel-plan --set parallel_lives`) | Pass | 5 briefs + manifest written; no network. Plan call ~3 min (local LLM). |
 | 2 | Validate a clip (`--reel-validate`) | Pass | With ffmpeg 9.0.2 installed: compliant clip `valid` (exit 0); silent clip `repaired`/`silent`; landscape clip `rejected` (exit 1). |
 | 3 | Dry-run Reel publish | Pass | `--reel-publish --set parallel_lives --brief parallel_lives:0 --dry-run` -> validate -> auto-approve -> synthetic container/media -> `PUBLISHED`, exit 0. No network/browser. |
-| 4 | Assisted production (`--reel-produce`) | Partial | Playwright 1.64 + Chromium installed; a real run launched the browser, detected the logged-out state and paused with an alert (exit 3). Added `--reel-login` (launch/poll/timeout/panel-clear verified) and corrected `login_form` against the live DOM (only `button:has-text('Login')` matches). Pending: operator sign-in **inside the profile window**, then capture `logged_in` selectors from the authenticated DOM. |
+| 4 | Assisted production (`--reel-produce`) | Pass | Playwright 1.64 + Chromium; `--reel-login` persists the operator session. A real run produced `reel_00.mp4` (576x1024, 5.04s, h264+aac) in ~1m46s and validated `valid` (exit 0). Fixes: SPA settle before the session guard; visible-only control selection; the create-settings popover driven for `540P`/`9:16`/`5s`; a Playwright fault mid-clip now pauses cleanly (`unexpected_ui`) instead of crashing; the service's "Insufficient Credits" paywall is detected as `limit_reached` (exit 3) rather than a 600s hang. |
 | 5 | Live Reel publish | Not run | Needs `config.local.yaml` credentials + R2 host + `meta.dry_run: false`. |
 | 6 | Retry / no duplicate | Pass | Re-running `--reel-publish` reports "already published ... not republishing" (exit 0); DB shows exactly one reel post for the brief. |
 | 7 | Static generation retired | Pass | `--generate-set` → argparse "unrecognized arguments" (exit 2); `src/generator/`, `.venv-gen/` removed; config keys gone. |
 | 8 | Regression: photo pipeline | Pass | `uv run main.py --account cat_1 --media data/input_media/sample_cat.jpg --dry-run` → exit 0, `PUBLISHED`. |
-| 9 | Lint + tests | Pass | `ruff check` clean; `pytest` 150 passed with ffmpeg on PATH (the 5 real-ffmpeg validator tests skip when it is absent, giving 145). |
+| 9 | Lint + tests | Pass | `ruff check` clean; `pytest` 157 passed with ffmpeg on PATH (the 5 real-ffmpeg validator tests skip when it is absent). |
 
