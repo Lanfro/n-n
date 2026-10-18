@@ -570,3 +570,91 @@ def test_upload_source_pauses_when_the_uploader_never_renders():
     with pytest.raises(BrowserPaused) as exc:
         drv._upload_source("photo.jpg", timeout_seconds=0)
     assert exc.value.state == UNEXPECTED_UI
+
+
+class _SigInput:
+    def __init__(self, page, index):
+        self.page = page
+        self.index = index
+
+    def set_input_files(self, path):
+        self.page.uploads.append((self.index, path))
+        if self.index in self.page.attach_indexes:
+            self.page.sig = f"new:{path}"
+
+
+class _StalePreviewPage:
+    """Previews already present (the last image); the attaching input replaces
+    them, so the count does not rise but the signature changes."""
+
+    def __init__(self, *, count=2, attach_indexes=(1,), stale="stale:old.jpg"):
+        self.inputs = [_SigInput(self, i) for i in range(count)]
+        self.attach_indexes = set(attach_indexes)
+        self.uploads: list[tuple[int, str]] = []
+        self.sig = stale
+
+    def query_selector_all(self, _sel):
+        return list(self.inputs)
+
+    def evaluate(self, _js):
+        return self.sig
+
+
+def test_upload_source_detects_a_replacement_over_a_stale_preview():
+    page = _StalePreviewPage(count=2, attach_indexes=(1,))
+    drv = _driver(page)
+    drv._upload_source("photo.jpg", timeout_seconds=0.1)
+    assert [i for i, _ in page.uploads] == [0, 1]
+
+
+class _StaleThumbPage:
+    """Models a restored image whose hover remove control clears it."""
+
+    def __init__(self, *, thumb=(100.0, 200.0), remove=(110.0, 190.0)):
+        from src.reel.producer import (
+            _ATTACHED_THUMB_JS,
+            _PREVIEW_SIG_JS,
+            _REMOVE_BUTTON_JS,
+        )
+
+        self._thumb_js = _ATTACHED_THUMB_JS
+        self._remove_js = _REMOVE_BUTTON_JS
+        self._sig_js = _PREVIEW_SIG_JS
+        self._thumb = thumb
+        self._remove = remove
+        self.sig = "stale.jpg"
+        self.mouse = self
+        self.moves: list[tuple[float, float]] = []
+        self.clicks: list[tuple[float, float]] = []
+
+    def evaluate(self, js, arg=None):
+        if js == self._thumb_js:
+            return self._thumb
+        if js == self._remove_js:
+            return self._remove
+        if js == self._sig_js:
+            return self.sig
+        return None
+
+    def move(self, x, y):
+        self.moves.append((x, y))
+
+    def click(self, x, y):
+        self.clicks.append((x, y))
+        self.sig = ""
+
+
+def test_clear_attached_photo_hovers_the_thumbnail_and_clicks_remove():
+    page = _StaleThumbPage()
+    drv = _driver(page)
+    drv._clear_attached_photo(timeout_seconds=1)
+    assert page.moves == [(100.0, 200.0)]
+    assert page.clicks == [(110.0, 190.0)]
+    assert page.sig == ""
+
+
+def test_clear_attached_photo_is_a_noop_without_a_thumbnail():
+    page = _StaleThumbPage(thumb=None)
+    drv = _driver(page)
+    drv._clear_attached_photo(timeout_seconds=1)
+    assert page.moves == [] and page.clicks == []

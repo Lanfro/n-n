@@ -62,26 +62,6 @@ _CLICK_TEXT_JS = r"""
 }
 """
 
-# JS: count visible "attached image" previews (a blob thumbnail, or a small
-# uploaded thumbnail). Used to confirm a photo actually attached before
-# generating - PixVerse keeps two file inputs and only one attaches.
-_PREVIEW_COUNT_JS = r"""
-() => {
-  const vis = (el) => { const r = el.getBoundingClientRect();
-    const st = window.getComputedStyle(el);
-    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden'
-      && st.display !== 'none'; };
-  let n = 0;
-  for (const el of document.querySelectorAll('img')) {
-    if (!vis(el)) continue;
-    const s = el.getAttribute('src') || '';
-    const r = el.getBoundingClientRect();
-    if (s.startsWith('blob:') || (s.includes('/upload/') && r.width <= 130)) n++;
-  }
-  return n;
-}
-"""
-
 # JS: centre of the generation-mode switcher item (Video/Image/Audio) whose
 # text equals `arg[0]`. The switcher labels carry the class
 # "z-10 absolute left-0 text-xs"; the same words also appear as top-level tabs
@@ -96,6 +76,68 @@ _SWITCH_MODE_JS = r"""
     if (!vis(el)) continue;
     if ((el.innerText || '').trim() !== text) continue;
     if (!/z-10 absolute left-0/.test(el.getAttribute('class') || '')) continue;
+    const r = el.getBoundingClientRect();
+    return [r.x + r.width / 2, r.y + r.height / 2];
+  }
+  return null;
+}
+"""
+
+# JS: a signature of visible "attached image" previews (blob/small upload
+# thumbnails). The create page keeps the last image across visits, so we detect
+# a *new* attachment by the signature changing rather than the count rising.
+_PREVIEW_SIG_JS = r"""
+() => {
+  const vis = (el) => { const r = el.getBoundingClientRect();
+    const st = window.getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden'
+      && st.display !== 'none'; };
+  const srcs = [];
+  for (const el of document.querySelectorAll('img')) {
+    if (!vis(el)) continue;
+    const s = el.getAttribute('src') || '';
+    const r = el.getBoundingClientRect();
+    if (s.startsWith('blob:') || (s.includes('/upload/') && r.width <= 130)) {
+      srcs.push(s);
+    }
+  }
+  return srcs.sort().join('|');
+}
+"""
+
+# JS: centre of the attached-source thumbnail (a small upload image). The
+# create page restores the previous clip's image on every visit.
+_ATTACHED_THUMB_JS = r"""
+() => {
+  const vis = (el) => { const r = el.getBoundingClientRect();
+    const st = window.getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden'
+      && st.display !== 'none'; };
+  for (const el of document.querySelectorAll('img')) {
+    if (!vis(el)) continue;
+    const s = el.getAttribute('src') || '';
+    const r = el.getBoundingClientRect();
+    if (s.includes('/upload/') && r.width >= 40 && r.width <= 130) {
+      return [r.x + r.width / 2, r.y + r.height / 2];
+    }
+  }
+  return null;
+}
+"""
+
+# JS: centre of the thumbnail's hover "remove" control (a small round button at
+# the top-right corner, revealed on hover).
+_REMOVE_BUTTON_JS = r"""
+() => {
+  const vis = (el) => { const r = el.getBoundingClientRect();
+    const st = window.getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden'
+      && st.display !== 'none'; };
+  for (const el of document.querySelectorAll('div, button, span')) {
+    const cls = el.getAttribute('class') || '';
+    if (!cls.includes('rounded-full') || !cls.includes('bg-black/70')) continue;
+    if (!cls.includes('-right-2') || !cls.includes('-top-2')) continue;
+    if (!vis(el)) continue;
     const r = el.getBoundingClientRect();
     return [r.x + r.width / 2, r.y + r.height / 2];
   }
@@ -338,11 +380,11 @@ class PlaywrightDriver:
 
     # -- create-settings popover ----------------------------------------
 
-    def _preview_count(self) -> int:
+    def _preview_signature(self) -> str:
         try:
-            return int(self.page.evaluate(_PREVIEW_COUNT_JS))
+            return str(self.page.evaluate(_PREVIEW_SIG_JS))
         except Exception:  # noqa: BLE001 - page churn during upload
-            return 0
+            return ""
 
     def _select_mode(self, mode: str = "Video", *, timeout_seconds: float = 6.0) -> bool:
         """Select the generation-mode switcher item (default "Video").
@@ -369,6 +411,39 @@ class PlaywrightDriver:
                 return False
             time.sleep(0.5)
 
+    def _clear_attached_photo(self, *, timeout_seconds: float = 5.0) -> None:
+        """Remove the image the create page restored from the previous clip.
+
+        While an image is attached the upload dropzone is disabled, so the next
+        brief's photo silently fails to attach. Hover the thumbnail to reveal
+        its remove control and click it, then wait for the preview to clear.
+        """
+        try:
+            thumb = self.page.evaluate(_ATTACHED_THUMB_JS)
+        except Exception as exc:  # noqa: BLE001 - page churn during load
+            logger.debug("Could not read the attached thumbnail: %s", exc)
+            return
+        if not isinstance(thumb, (list, tuple)) or len(thumb) != 2:
+            return
+        self.page.mouse.move(thumb[0], thumb[1])
+        time.sleep(0.5)
+        try:
+            remove = self.page.evaluate(_REMOVE_BUTTON_JS)
+        except Exception as exc:  # noqa: BLE001 - page churn during hover
+            logger.debug("Could not read the remove control: %s", exc)
+            return
+        if not isinstance(remove, (list, tuple)) or len(remove) != 2:
+            logger.debug("No remove control on the attached thumbnail")
+            return
+        self.page.mouse.click(remove[0], remove[1])
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if not self._preview_signature():
+                logger.debug("Cleared the restored source image")
+                return
+            time.sleep(0.5)
+        logger.debug("Restored source image did not clear in time")
+
     def _wait_for_file_inputs(self, timeout_seconds: float) -> list[Any]:
         """Poll for the create page's ``input[type=file]`` elements to appear."""
         deadline = time.monotonic() + timeout_seconds
@@ -385,13 +460,16 @@ class PlaywrightDriver:
 
         The create page exposes two ``input[type=file]`` elements but only one
         actually attaches an image; setting the wrong one silently leaves the
-        job as text-to-video (a generic cat), so we confirm an image preview
-        appeared and otherwise try the next input.
+        job as text-to-video (a generic cat). The page also keeps the *previous*
+        image across visits (its dropzone disabled), so we clear that first and
+        confirm the attachment by the preview signature *changing* (not the
+        count rising), otherwise trying the next input.
         """
+        self._clear_attached_photo()
         inputs = self._wait_for_file_inputs(timeout_seconds)
         if not inputs:
             raise BrowserPaused(UNEXPECTED_UI, "no file input on the create page")
-        baseline = self._preview_count()
+        baseline = self._preview_signature()
         for idx, element in enumerate(inputs):
             try:
                 element.set_input_files(photo)
@@ -400,7 +478,7 @@ class PlaywrightDriver:
                 continue
             deadline = time.monotonic() + timeout_seconds
             while time.monotonic() < deadline:
-                if self._preview_count() > baseline:
+                if self._preview_signature() != baseline:
                     logger.debug("Source photo attached via file input %d", idx)
                     return
                 time.sleep(0.5)
