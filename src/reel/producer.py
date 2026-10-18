@@ -344,25 +344,41 @@ class PlaywrightDriver:
         except Exception:  # noqa: BLE001 - page churn during upload
             return 0
 
-    def _select_mode(self, mode: str = "Video") -> bool:
+    def _select_mode(self, mode: str = "Video", *, timeout_seconds: float = 6.0) -> bool:
         """Select the generation-mode switcher item (default "Video").
 
         The create page remembers the last mode; leaving "Image" selected turns
         the job into text-to-image/edit. Best effort: when the switcher cannot
         be found we keep whatever is selected (the validator still rejects any
-        clip that misses the bounds).
+        clip that misses the bounds). Polls, because the create panel renders
+        after the header markers that ``_settle`` waits for.
         """
-        try:
-            box = self.page.evaluate(_SWITCH_MODE_JS, mode)
-        except Exception as exc:  # noqa: BLE001 - page churn during load
-            logger.debug("Could not read the mode switcher: %s", exc)
-            return False
-        if not box:
-            logger.debug("Mode switcher item %r not found", mode)
-            return False
-        self.page.mouse.click(box[0], box[1])
-        time.sleep(1.0)
-        return True
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            try:
+                box = self.page.evaluate(_SWITCH_MODE_JS, mode)
+            except Exception as exc:  # noqa: BLE001 - page churn during load
+                logger.debug("Could not read the mode switcher: %s", exc)
+                box = None
+            if box:
+                self.page.mouse.click(box[0], box[1])
+                time.sleep(1.0)
+                return True
+            if time.monotonic() >= deadline:
+                logger.debug("Mode switcher item %r not found", mode)
+                return False
+            time.sleep(0.5)
+
+    def _wait_for_file_inputs(self, timeout_seconds: float) -> list[Any]:
+        """Poll for the create page's ``input[type=file]`` elements to appear."""
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            inputs = self.page.query_selector_all("input[type=file]")
+            if inputs:
+                return list(inputs)
+            if time.monotonic() >= deadline:
+                return []
+            time.sleep(0.5)
 
     def _upload_source(self, photo: str, *, timeout_seconds: float = 10.0) -> None:
         """Attach the source photo, trying each file input until one registers.
@@ -372,7 +388,7 @@ class PlaywrightDriver:
         job as text-to-video (a generic cat), so we confirm an image preview
         appeared and otherwise try the next input.
         """
-        inputs = self.page.query_selector_all("input[type=file]")
+        inputs = self._wait_for_file_inputs(timeout_seconds)
         if not inputs:
             raise BrowserPaused(UNEXPECTED_UI, "no file input on the create page")
         baseline = self._preview_count()

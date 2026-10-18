@@ -539,5 +539,34 @@ def test_select_mode_clicks_the_video_switcher_item():
 def test_select_mode_is_best_effort_when_the_switcher_is_absent():
     page = _ModePage(box=None)
     drv = _driver(page)
-    assert drv._select_mode("Video") is False
+    assert drv._select_mode("Video", timeout_seconds=0) is False
     assert page.clicks == []
+
+
+class _NoInputPage:
+    """A create page whose uploader never renders."""
+
+    def __init__(self):
+        self.queries = 0
+        self.mouse = self
+        self.clicks: list[tuple[float, float]] = []
+
+    def query_selector_all(self, _sel):
+        self.queries += 1
+        return []
+
+    def evaluate(self, _js):
+        return 0
+
+    def click(self, x, y):
+        self.clicks.append((x, y))
+
+
+def test_upload_source_pauses_when_the_uploader_never_renders():
+    from src.reel.producer import UNEXPECTED_UI
+
+    page = _NoInputPage()
+    drv = _driver(page)
+    with pytest.raises(BrowserPaused) as exc:
+        drv._upload_source("photo.jpg", timeout_seconds=0)
+    assert exc.value.state == UNEXPECTED_UI
